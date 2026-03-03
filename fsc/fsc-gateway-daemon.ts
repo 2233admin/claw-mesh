@@ -17,11 +17,12 @@ import { randomUUID } from 'crypto';
 // ============ 配置 ============
 const REDIS_HOST = process.env.REDIS_HOST || '127.0.0.1';
 const REDIS_PORT = parseInt(process.env.REDIS_PORT || '6379');
-const TASK_QUEUE = 'fsc:task_queue';
-const RESULT_QUEUE = 'fsc:result_queue';
-const FAILED_QUEUE = 'fsc:failed_tasks';
+const TASK_STREAM = 'fsc:task_stream';
+const RESULT_STREAM = 'fsc:result_stream';
+const TASK_CONSUMER_GROUP = 'fsc:workers';
 const TASK_STORE_PREFIX = 'fsc:task:';
 const RESULT_STORE_PREFIX = 'fsc:result:';
+const WORKERS_PREFIX = 'fsc:workers';
 
 // ============ Logger ============
 const logger = winston.createLogger({
@@ -108,12 +109,40 @@ async function getResult(taskId: string): Promise<TaskResult | null> {
   return data ? JSON.parse(data) : null;
 }
 
+// ============ 初始化 Stream 和 Consumer Group ============
+async function initializeStreams() {
+  try {
+    await redis.xGroupCreate(TASK_STREAM, TASK_CONSUMER_GROUP, '0', { MKSTREAM: true });
+    logger.info(`Consumer group ${TASK_CONSUMER_GROUP} created for stream ${TASK_STREAM}`);
+  } catch (err: any) {
+    if (err.message.includes('BUSYGROUP')) {
+      logger.info(`Consumer group ${TASK_CONSUMER_GROUP} already exists`);
+    } else {
+      throw err;
+    }
+  }
+}
+
 // ============ 提交任务 ============
 async function submitTask(task: Task): Promise<string> {
   logger.info(`[Gateway] Submitting task ${task.id}`);
   await storeTask(task);
-  await redis.rPush(TASK_QUEUE, JSON.stringify(task));
+  await redis.xAdd(TASK_STREAM, '*', {
+    id: task.id,
+    image: task.image,
+    commands: JSON.stringify(task.commands),
+    timeoutSeconds: task.timeoutSeconds?.toString() || '300'
+  });
   return task.id;
+}
+
+// ============ Worker 心跳 ============
+async function updateWorkerHeartbeat(workerId: string, load: number) {
+  await redis.hSet(WORKERS_PREFIX, workerId, JSON.stringify({
+    id: workerId,
+    lastSeen: Date.now(),
+    load
+  }));
 }
 
 // ============ 结果收集循环 ============
@@ -124,17 +153,27 @@ async function resultCollectorLoop() {
 
   while (!isShuttingDown) {
     try {
-      const result = await redis.blPop(RESULT_QUEUE, 5);
+      const results = await redis.xRead(
+        { key: RESULT_STREAM, id: '0' },
+        { COUNT: 10, BLOCK: 5000 }
+      );
 
-      if (!result) {
+      if (!results || results.length === 0) {
         continue;
       }
 
-      const taskResult = JSON.parse(result.element) as TaskResult;
-      logger.info(`[Gateway] Received result for task ${taskResult.taskId}: ${taskResult.status}`);
+      for (const streamResult of results) {
+        for (const message of streamResult.messages) {
+          const taskResult = JSON.parse(message.message.result as string) as TaskResult;
+          logger.info(`[Gateway] Received result for task ${taskResult.taskId}: ${taskResult.status}`);
 
-      // 存储结果
-      await storeResult(taskResult);
+          // 存储结果
+          await storeResult(taskResult);
+
+          // ACK 消息
+          await redis.xDel(RESULT_STREAM, message.id);
+        }
+      }
     } catch (error) {
       logger.error('Result collector error:', error);
       await new Promise(resolve => setTimeout(resolve, 1000));
@@ -191,11 +230,13 @@ async function handleCli() {
 
     } else if (args[0] === 'status') {
       // 查看状态：status
-      const queueLen = await redis.lLen(TASK_QUEUE);
-      const resultLen = await redis.lLen(RESULT_QUEUE);
-      const failedLen = await redis.lLen(FAILED_QUEUE);
+      const taskInfo = await redis.xInfoStream(TASK_STREAM);
+      const resultInfo = await redis.xInfoStream(RESULT_STREAM);
+      const workers = await redis.hGetAll(WORKERS_PREFIX);
 
-      console.log(`Queue: ${queueLen} pending, ${resultLen} results, ${failedLen} failed`);
+      console.log('Task Stream:', taskInfo);
+      console.log('Result Stream:', resultInfo);
+      console.log('Workers:', workers);
       process.exit(0);
 
     } else {
@@ -211,17 +252,17 @@ async function handleCli() {
 // ============ 健康检查 ============
 setInterval(async () => {
   try {
-    const queueLen = await redis.lLen(TASK_QUEUE);
-    const resultLen = await redis.lLen(RESULT_QUEUE);
-    const failedLen = await redis.lLen(FAILED_QUEUE);
+    const taskInfo = await redis.xInfoStream(TASK_STREAM).catch(() => null);
+    const resultInfo = await redis.xInfoStream(RESULT_STREAM).catch(() => null);
+    const workers = await redis.hGetAll(WORKERS_PREFIX).catch(() => ({}));
 
     await redis.set('fsc:gateway:health', JSON.stringify({
       timestamp: Date.now(),
-      queues: {
-        task: queueLen,
-        result: resultLen,
-        failed: failedLen
-      }
+      streams: {
+        task: taskInfo ? taskInfo.length : 0,
+        result: resultInfo ? resultInfo.length : 0
+      },
+      workers: Object.keys(workers).length
     }), { EX: 60 });
   } catch (error) {
     logger.error('Health check failed:', error);
@@ -244,6 +285,7 @@ process.on('SIGINT', () => shutdown('SIGINT'));
 async function main() {
   logger.info('FSC Gateway Daemon starting...');
   await redis.connect();
+  await initializeStreams();
   resultCollectorLoop().catch((error) => {
     logger.error('Fatal error in result collector:', error);
     process.exit(1);
