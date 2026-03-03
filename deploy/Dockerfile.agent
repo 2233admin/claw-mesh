@@ -1,0 +1,38 @@
+# FSC Agent 执行镜像
+# Alpine + Node.js + Docker CLI
+# 用于 Ralph 循环中的 fresh-context agent 执行
+
+FROM node:18-alpine
+
+# 安装 Docker CLI（用于容器内执行 Docker 命令）
+RUN apk add --no-cache \
+    docker-cli \
+    git \
+    bash \
+    curl
+
+# 设置工作目录
+WORKDIR /workspace
+
+# 复制 package.json 和依赖
+COPY package.json bun.lockb* ./
+RUN npm install -g bun && bun install
+
+# 复制源代码
+COPY . .
+
+# 环境变量
+ENV NODE_ENV=production
+ENV REDIS_HOST=10.10.0.1
+ENV REDIS_PORT=6379
+ENV MAX_CONCURRENT=10
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:8080/health || exit 1
+
+# 暴露端口（MCP 监控）
+EXPOSE 8080
+
+# 启动命令
+CMD ["bun", "run", "fsc/fsc-worker-daemon.ts"]

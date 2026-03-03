@@ -1,0 +1,203 @@
+{
+  "project": "fsc-mesh-skill",
+  "version": "0.1.0",
+  "status": "in_progress",
+  "stories": [
+    {
+      "id": "story-1",
+      "title": "Redis Streams 集成",
+      "status": "completed",
+      "tasks": [
+        {
+          "id": "task-1-1",
+          "description": "替换 BLPOP 为 XREADGROUP",
+          "status": "completed",
+          "commit": "25924ec"
+        },
+        {
+          "id": "task-1-2",
+          "description": "实现 XACK 确认机制",
+          "status": "completed",
+          "commit": "25924ec"
+        },
+        {
+          "id": "task-1-3",
+          "description": "添加 consumer group 创建逻辑",
+          "status": "completed",
+          "commit": "25924ec"
+        }
+      ],
+      "verify": {
+        "checks": [
+          "XREADGROUP+XACK 正确实现",
+          "消息不会丢失"
+        ],
+        "status": "passed"
+      }
+    },
+    {
+      "id": "story-2",
+      "title": "Semaphore 并发控制",
+      "status": "completed",
+      "tasks": [
+        {
+          "id": "task-2-1",
+          "description": "实现 Semaphore 类",
+          "status": "completed",
+          "commit": "25924ec"
+        },
+        {
+          "id": "task-2-2",
+          "description": "添加 finally 释放逻辑",
+          "status": "completed",
+          "commit": "25924ec"
+        }
+      ],
+      "verify": {
+        "checks": [
+          "Semaphore acquire/release 正确",
+          "finally 块确保释放"
+        ],
+        "status": "passed"
+      }
+    },
+    {
+      "id": "story-3",
+      "title": "优雅退出机制",
+      "status": "completed",
+      "tasks": [
+        {
+          "id": "task-3-1",
+          "description": "实现 SIGTERM 处理",
+          "status": "completed",
+          "commit": "25924ec"
+        },
+        {
+          "id": "task-3-2",
+          "description": "添加 drain 逻辑（120s 超时）",
+          "status": "completed",
+          "commit": "25924ec"
+        }
+      ],
+      "verify": {
+        "checks": [
+          "SIGTERM 触发优雅退出",
+          "等待任务完成后退出",
+          "120s 超时强制退出"
+        ],
+        "status": "passed"
+      }
+    },
+    {
+      "id": "story-4",
+      "title": "错误处理和 DLQ",
+      "status": "completed",
+      "tasks": [
+        {
+          "id": "task-4-1",
+          "description": "添加 unhandledRejection 处理",
+          "status": "completed",
+          "commit": "25924ec"
+        },
+        {
+          "id": "task-4-2",
+          "description": "实现 DLQ (fsc:dead_letter_queue)",
+          "status": "completed",
+          "commit": "25924ec"
+        },
+        {
+          "id": "task-4-3",
+          "description": "添加重试逻辑（<3 次，指数退避）",
+          "status": "completed",
+          "commit": "25924ec"
+        }
+      ],
+      "verify": {
+        "checks": [
+          "unhandledRejection 发送到 DLQ",
+          "失败任务重试 3 次",
+          "最终失败进入 DLQ"
+        ],
+        "status": "passed"
+      }
+    },
+    {
+      "id": "story-5",
+      "title": "Event-driven MemoV Snapshot",
+      "status": "completed",
+      "tasks": [
+        {
+          "id": "task-5-1",
+          "description": "移除 30s 定时器",
+          "status": "completed",
+          "commit": "25924ec"
+        },
+        {
+          "id": "task-5-2",
+          "description": "实现事件驱动快照",
+          "status": "completed",
+          "commit": "25924ec"
+        }
+      ],
+      "verify": {
+        "checks": [
+          "快照由事件触发",
+          "不再使用定时器"
+        ],
+        "status": "passed"
+      }
+    },
+    {
+      "id": "story-6",
+      "title": "Antfarm Workflow 集成",
+      "status": "completed",
+      "tasks": [
+        {
+          "id": "task-6-1",
+          "description": "创建 antfarm-workflow.yml",
+          "status": "completed",
+          "commit": "1496e32"
+        }
+      ],
+      "verify": {
+        "checks": [
+          "6-agent pipeline 定义完整",
+          "验证检查项正确"
+        ],
+        "status": "passed"
+      }
+    },
+    {
+      "id": "story-7",
+      "title": "部署和监控",
+      "status": "in_progress",
+      "tasks": [
+        {
+          "id": "task-7-1",
+          "description": "创建 Dockerfile.agent",
+          "status": "in_progress"
+        },
+        {
+          "id": "task-7-2",
+          "description": "实现 MCP 监控服务",
+          "status": "pending"
+        },
+        {
+          "id": "task-7-3",
+          "description": "添加单元测试",
+          "status": "pending"
+        }
+      ],
+      "verify": {
+        "checks": [
+          "Docker 镜像构建成功",
+          "MCP 监控服务运行",
+          "测试覆盖率 >80%"
+        ],
+        "status": "pending"
+      }
+    }
+  ],
+  "passes": false,
+  "next_story": "story-7"
+}
