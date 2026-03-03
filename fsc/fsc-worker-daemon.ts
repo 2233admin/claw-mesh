@@ -8,11 +8,13 @@
  * - 执行 FSC Docker 实例
  * - 推送结果到 Redis
  * - 错误处理、重试、优雅退出
+ * - MemoV event-driven snap()（任务成功时自动触发）
  */
 
 import { createClient } from 'redis';
 import { DockerInstance } from './packages/core/src/dockerInstance';
 import winston from 'winston';
+import { memovSnap } from './memov-event-snap';
 
 // ============ 配置 ============
 const REDIS_HOST = process.env.REDIS_HOST || '10.10.0.1';
@@ -194,6 +196,14 @@ async function mainLoop() {
           await redis.rPush(FAILED_QUEUE, JSON.stringify(taskResult));
           logger.error(`[Task ${taskData.id}] Failed, moved to ${FAILED_QUEUE}`);
         }
+
+        // MemoV event-driven snap()
+        await memovSnap(
+          taskData.id,
+          taskResult.status,
+          taskResult.output,
+          taskResult.error
+        );
       });
       
     } catch (error) {
