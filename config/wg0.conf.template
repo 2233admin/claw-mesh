@@ -1,0 +1,22 @@
+[Interface]
+PrivateKey = <YOUR_PRIVATE_KEY>
+Address = 10.10.0.X/24
+ListenPort = 51820
+MTU = 1420
+
+# Docker 双向转发 + MASQUERADE
+PostUp = iptables -A FORWARD -i wg0 -j ACCEPT
+PostUp = iptables -A FORWARD -o wg0 -j ACCEPT
+PostUp = iptables -t nat -A POSTROUTING -o docker0 -j MASQUERADE
+PostUp = iptables -t nat -A POSTROUTING -o wg0 -j MASQUERADE
+
+PostDown = iptables -D FORWARD -i wg0 -j ACCEPT
+PostDown = iptables -D FORWARD -o wg0 -j ACCEPT
+PostDown = iptables -t nat -D POSTROUTING -o docker0 -j MASQUERADE
+PostDown = iptables -t nat -D POSTROUTING -o wg0 -j MASQUERADE
+
+# Peer 配置示例
+[Peer]
+PublicKey = <PEER_PUBLIC_KEY>
+AllowedIPs = 10.10.0.Y/32
+PersistentKeepalive = 25

@@ -319,9 +319,10 @@ async function mainLoop() {
                 logger.info(`[Task ${taskData.id}] Result pushed to ${RESULT_STREAM}`);
               }
               
-              // XACK 确认消息
+              // XACK 确认消息（前）
+              logger.info(`[Task ${taskData.id}] Acknowledging message: ${messageId}`);
               await redis.xAck(STREAM_KEY, CONSUMER_GROUP, messageId);
-              logger.info(`[Task ${taskData.id}] Message acknowledged`);
+              logger.info(`[Task ${taskData.id}] Message acknowledged: ${messageId}`);
               
               // 释放锁
               await redis.del(lockKey);
