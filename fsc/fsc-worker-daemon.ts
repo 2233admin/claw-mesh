@@ -1,14 +1,20 @@
 #!/usr/bin/env bun
 /**
- * FSC Worker Daemon v0.2.0
- * 符合 FSC-MESH 规范 + WireGuard Mesh 集成
+ * FSC Worker Daemon v0.3.0
+ * 符合 FSC-MESH 规范 + WireGuard Mesh 集成 + 主动自愈引擎
  * 
- * 新增：
+ * v0.3.0 新增：
+ * - 主动自愈引擎（Proactive Healing Engine）
+ *   - 僵尸容器清理（防宿主机磁盘爆炸）
+ *   - 网络断联主动自救（连续 3 次 ping 失败自动重启 WireGuard）
+ *   - 主动心跳与资源上报（CPU、内存、磁盘、任务数）
+ * 
+ * v0.2.0 功能：
  * - 分布式锁（Redis SETNX）防止多节点重复执行
  * - 锁自动过期（5分钟）防止死锁
  * - 锁释放保证（try-finally）
  * 
- * 已有功能：
+ * v0.1.0 功能：
  * - Redis Streams (XREADGROUP+XACK) 替代 BLPOP
  * - Semaphore 并发控制 + finally 释放
  * - unhandledRejection + DLQ
@@ -234,12 +240,13 @@ let isShuttingDown = false;
 let drainingTasks = 0;
 
 async function mainLoop() {
-  logger.info('FSC Worker Daemon v0.2.0 starting...');
+  logger.info('FSC Worker Daemon v0.3.0 starting...');
   logger.info(`Redis: ${REDIS_HOST}:${REDIS_PORT}`);
   logger.info(`Consumer: ${CONSUMER_GROUP}/${CONSUMER_NAME}`);
   logger.info(`Max concurrent: ${MAX_CONCURRENT}`);
   logger.info(`Agent ID: ${AGENT_ID}`);
   logger.info(`Distributed lock: Enabled (Redis SETNX with 300s TTL)`);
+  logger.info(`Self-healing: Enabled (60s interval)`);
   
   await redis.connect();
   
@@ -354,6 +361,192 @@ setInterval(async () => {
     logger.error('Health check failed:', error);
   }
 }, 30000);
+
+// ============ Worker 主动自愈引擎 (Proactive Healing Engine) ============
+/**
+ * 核心功能：
+ * 1. 僵尸容器清理（防宿主机磁盘爆炸）
+ * 2. 网络断联主动自救（别干等 Master 发现）
+ * 3. 主动心跳与资源上报
+ */
+
+let networkFailureCount = 0;
+
+async function proactiveSelfHealing() {
+  logger.debug('[Self-Healing] Starting proactive health check...');
+  
+  try {
+    // ========== 功能 1: 僵尸容器清理 ==========
+    await cleanupZombieContainers();
+    
+    // ========== 功能 2: 网络断联主动自救 ==========
+    await checkAndHealNetwork();
+    
+    // ========== 功能 3: 主动心跳与资源上报 ==========
+    await reportHeartbeat();
+    
+  } catch (error) {
+    logger.error('[Self-Healing] Error during self-healing:', error);
+  }
+}
+
+// 功能 1: 清理僵尸容器
+async function cleanupZombieContainers() {
+  try {
+    const { exec } = await import('child_process');
+    const { promisify } = await import('util');
+    const execAsync = promisify(exec);
+    
+    // 清理已退出的容器
+    try {
+      const { stdout: exitedContainers } = await execAsync('docker ps -aq -f status=exited');
+      if (exitedContainers.trim()) {
+        await execAsync(`docker rm ${exitedContainers.trim().split('\n').join(' ')}`);
+        logger.info('[Self-Healing] Cleaned up exited containers');
+      }
+    } catch (err) {
+      // 没有容器需要清理，忽略错误
+    }
+    
+    // 清理超过 2 小时的卡死容器
+    const { stdout: runningContainers } = await execAsync(
+      "docker ps --format '{{.ID}} {{.RunningFor}}' | grep -E 'hours|days' || true"
+    );
+    
+    if (runningContainers.trim()) {
+      const lines = runningContainers.trim().split('\n');
+      for (const line of lines) {
+        const [containerId, ...timeParts] = line.split(' ');
+        const timeStr = timeParts.join(' ');
+        
+        // 检查是否超过 2 小时
+        if (timeStr.includes('hours') || timeStr.includes('days')) {
+          const hours = timeStr.includes('days') ? 48 : parseInt(timeStr);
+          if (hours >= 2) {
+            await execAsync(`docker kill ${containerId}`);
+            logger.warn(`[Self-Healing] Killed stuck container: ${containerId} (running for ${timeStr})`);
+          }
+        }
+      }
+    }
+    
+    // 清理游离的 Docker volume
+    try {
+      await execAsync('docker volume prune -f');
+      logger.debug('[Self-Healing] Pruned dangling volumes');
+    } catch (err) {
+      // 忽略错误
+    }
+    
+  } catch (error) {
+    logger.error('[Self-Healing] Container cleanup failed:', error);
+  }
+}
+
+// 功能 2: 网络断联主动自救
+async function checkAndHealNetwork() {
+  try {
+    const { exec } = await import('child_process');
+    const { promisify } = await import('util');
+    const execAsync = promisify(exec);
+    
+    // 尝试 ping Redis 主节点
+    try {
+      await execAsync(`ping -c 1 -W 1 ${REDIS_HOST}`);
+      
+      // Ping 成功，重置失败计数
+      if (networkFailureCount > 0) {
+        logger.info('[Self-Healing] Network recovered');
+        networkFailureCount = 0;
+        
+        // 上报网络恢复事件
+        await redis.xAdd('fsc:mem_events', '*', {
+          type: 'network_healed',
+          agent_id: AGENT_ID,
+          timestamp: Date.now().toString()
+        });
+      }
+      
+    } catch (pingError) {
+      networkFailureCount++;
+      logger.warn(`[Self-Healing] Network check failed (${networkFailureCount}/3)`);
+      
+      // 连续 3 次失败，主动重启 WireGuard
+      if (networkFailureCount >= 3) {
+        logger.error('[Self-Healing] Network down, restarting WireGuard...');
+        
+        try {
+          await execAsync('sudo systemctl restart wg-quick@wg0');
+          logger.info('[Self-Healing] WireGuard restarted');
+          
+          // 等待 5 秒让网络恢复
+          await new Promise(resolve => setTimeout(resolve, 5000));
+          
+          // 重置计数
+          networkFailureCount = 0;
+          
+        } catch (restartError) {
+          logger.error('[Self-Healing] Failed to restart WireGuard:', restartError);
+        }
+      }
+    }
+    
+  } catch (error) {
+    logger.error('[Self-Healing] Network check failed:', error);
+  }
+}
+
+// 功能 3: 主动心跳与资源上报
+async function reportHeartbeat() {
+  try {
+    const { exec } = await import('child_process');
+    const { promisify } = await import('util');
+    const execAsync = promisify(exec);
+    
+    // 获取 CPU 使用率
+    const { stdout: cpuUsage } = await execAsync(
+      "top -bn1 | grep 'Cpu(s)' | sed 's/.*, *\\([0-9.]*\\)%* id.*/\\1/' | awk '{print 100 - $1}'"
+    );
+    
+    // 获取可用内存
+    const { stdout: memInfo } = await execAsync(
+      "free -m | awk 'NR==2{printf \"%s/%s\", $3,$2}'"
+    );
+    
+    // 获取磁盘使用率
+    const { stdout: diskUsage } = await execAsync(
+      "df -h / | awk 'NR==2{print $5}'"
+    );
+    
+    const metrics = {
+      cpu_usage: parseFloat(cpuUsage.trim()).toFixed(2),
+      memory_usage: memInfo.trim(),
+      disk_usage: diskUsage.trim(),
+      running_tasks: MAX_CONCURRENT - semaphore.available(),
+      max_concurrent: MAX_CONCURRENT,
+      timestamp: Date.now()
+    };
+    
+    // 推送心跳到 Redis
+    await redis.xAdd('fsc:heartbeats', '*', {
+      agent: AGENT_ID,
+      metrics: JSON.stringify(metrics)
+    });
+    
+    logger.debug(`[Self-Healing] Heartbeat sent: ${JSON.stringify(metrics)}`);
+    
+  } catch (error) {
+    logger.error('[Self-Healing] Heartbeat report failed:', error);
+  }
+}
+
+// 启动自愈引擎（每 60 秒巡检一次）
+setInterval(async () => {
+  if (isShuttingDown) return;
+  await proactiveSelfHealing();
+}, 60000);
+
+logger.info('[Self-Healing] Proactive healing engine started (60s interval)');
 
 // ============ 优雅退出 (SIGTERM → drain → exit) ============
 async function shutdown(signal: string) {
