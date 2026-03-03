@@ -1,9 +1,14 @@
 #!/usr/bin/env bun
 /**
- * FSC Worker Daemon v0.1.0
- * 符合 FSC-MESH 规范
+ * FSC Worker Daemon v0.2.0
+ * 符合 FSC-MESH 规范 + WireGuard Mesh 集成
  * 
- * 修复：
+ * 新增：
+ * - 分布式锁（Redis SETNX）防止多节点重复执行
+ * - 锁自动过期（5分钟）防止死锁
+ * - 锁释放保证（try-finally）
+ * 
+ * 已有功能：
  * - Redis Streams (XREADGROUP+XACK) 替代 BLPOP
  * - Semaphore 并发控制 + finally 释放
  * - unhandledRejection + DLQ
@@ -229,11 +234,12 @@ let isShuttingDown = false;
 let drainingTasks = 0;
 
 async function mainLoop() {
-  logger.info('FSC Worker Daemon v0.1.0 starting...');
+  logger.info('FSC Worker Daemon v0.2.0 starting...');
   logger.info(`Redis: ${REDIS_HOST}:${REDIS_PORT}`);
   logger.info(`Consumer: ${CONSUMER_GROUP}/${CONSUMER_NAME}`);
   logger.info(`Max concurrent: ${MAX_CONCURRENT}`);
   logger.info(`Agent ID: ${AGENT_ID}`);
+  logger.info(`Distributed lock: Enabled (Redis SETNX with 300s TTL)`);
   
   await redis.connect();
   
@@ -270,6 +276,22 @@ async function mainLoop() {
           const taskData = JSON.parse(message.task) as Task;
           logger.info(`[Task ${taskData.id}] Received from stream`);
           
+          // 分布式锁：防止多节点重复执行
+          const lockKey = `lock:task:${messageId}`;
+          const lockAcquired = await redis.set(lockKey, CONSUMER_NAME, {
+            NX: true,  // Only set if not exists
+            EX: 300    // Expire after 5 minutes
+          });
+          
+          if (!lockAcquired) {
+            logger.warn(`[Task ${taskData.id}] Lock already held by another worker, skipping`);
+            // XACK 确认消息（避免重复消费）
+            await redis.xAck(STREAM_KEY, CONSUMER_GROUP, messageId);
+            continue;
+          }
+          
+          logger.info(`[Task ${taskData.id}] Lock acquired: ${lockKey}`);
+          
           // Semaphore 控制并发
           await semaphore.acquire();
           drainingTasks++;
@@ -294,8 +316,14 @@ async function mainLoop() {
               await redis.xAck(STREAM_KEY, CONSUMER_GROUP, messageId);
               logger.info(`[Task ${taskData.id}] Message acknowledged`);
               
+              // 释放锁
+              await redis.del(lockKey);
+              logger.info(`[Task ${taskData.id}] Lock released: ${lockKey}`);
+              
             } catch (error) {
               logger.error(`[Task ${taskData.id}] Execution error:`, error);
+              // 确保锁被释放
+              await redis.del(lockKey);
             } finally {
               semaphore.release();
               drainingTasks--;
