@@ -6,6 +6,7 @@ import { MeshTopology } from './components/MeshTopology';
 import { StarOfficePanel } from './components/StarOfficePanel';
 import { EventTimeline } from './components/EventTimeline';
 import { TaskTable } from './components/TaskTable';
+import { GovernancePanel } from './components/GovernancePanel';
 import { useMeshStore } from './stores/useMeshStore';
 import { useTaskStore } from './stores/useTaskStore';
 import { useEventStore } from './stores/useEventStore';
@@ -71,6 +72,7 @@ function App() {
           <main className="flex-1 overflow-y-auto p-4 space-y-4">
             {activeNav === 'mesh' && <MeshView />}
             {activeNav === 'tasks' && <TasksView />}
+            {activeNav === 'governance' && <GovernanceView />}
             {activeNav === 'logs' && <LogsView />}
             {activeNav === 'ai' && <AIView />}
             {activeNav === 'settings' && <SettingsView />}
@@ -116,6 +118,10 @@ function TasksView() {
       </div>
     </>
   );
+}
+
+function GovernanceView() {
+  return <GovernancePanel />;
 }
 
 function LogsView() {

@@ -7,6 +7,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { id: 'mesh',  icon: '◉', label: 'Mesh' },
   { id: 'tasks', icon: '◫', label: 'Tasks' },
+  { id: 'governance', icon: '⚖', label: 'Governance' },
   { id: 'logs',  icon: '☵', label: 'Logs' },
   { id: 'ai',    icon: '★', label: 'AI' },
   { id: 'settings', icon: '⚙', label: 'Settings' },
