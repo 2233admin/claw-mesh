@@ -128,12 +128,34 @@ process.on('unhandledRejection', async (reason, promise) => {
   }
 });
 
+// ============ 失败分类 ============
+type FailureClass = 'RESOURCE' | 'TRANSIENT' | 'PERMANENT' | 'QUALITY' | 'UNKNOWN';
+
+function classifyFailure(error: string): FailureClass {
+  if (/OOM|out of memory|ENOMEM|disk full|No space/i.test(error)) return 'RESOURCE';
+  if (/ECONNREFUSED|timeout|ETIMEDOUT|ENOTFOUND/i.test(error)) return 'TRANSIENT';
+  if (/permission denied|EACCES|EPERM/i.test(error)) return 'PERMANENT';
+  if (/lint|test.*fail|type.*error|compilation|eslint/i.test(error)) return 'QUALITY';
+  return 'UNKNOWN';
+}
+
+// 不同失败类型的重试策略
+const RETRY_CONFIG: Record<FailureClass, { maxRetries: number; backoffBase: number }> = {
+  RESOURCE:  { maxRetries: 2, backoffBase: 5000 },   // 重试少、间隔长
+  TRANSIENT: { maxRetries: 3, backoffBase: 2000 },   // 标准退避
+  PERMANENT: { maxRetries: 0, backoffBase: 0 },       // 不重试
+  QUALITY:   { maxRetries: 1, backoffBase: 1000 },    // 重试 1 次（换 Agent 在调度层）
+  UNKNOWN:   { maxRetries: 3, backoffBase: 2000 },    // 标准重试
+};
+
 // ============ 任务执行 ============
 interface Task {
   id: string;
   image: string;
   commands: string[];
   timeoutSeconds?: number;
+  riskLevel?: string;
+  estimatedTokens?: number;
 }
 
 interface TaskResult {
@@ -141,49 +163,60 @@ interface TaskResult {
   status: 'success' | 'failure' | 'timeout';
   output?: string;
   error?: string;
+  failureClass?: FailureClass;
   timestamp: number;
+  durationMs?: number;
 }
 
 async function executeTask(task: Task): Promise<TaskResult> {
   const startTime = Date.now();
-  logger.info(`[Task ${task.id}] Starting execution`);
-  
+  logger.info(`[Task ${task.id}] Starting execution (risk=${task.riskLevel || 'low'})`);
+
+  // 发射 task_started 事件
+  await triggerMemoVSnapshot(task.id, 'task_started');
+
   try {
     const docker = new DockerInstance();
-    
+
     // 启动容器
     const containerName = await docker.startContainer(task.image, `fsc-${task.id}`);
     logger.info(`[Task ${task.id}] Container started: ${containerName}`);
-    
+
     // 执行命令
     const result = await docker.runCommands(task.commands, task.timeoutSeconds);
-    
+
     // 清理容器
     await docker.stopContainer();
-    
-    const duration = Date.now() - startTime;
-    logger.info(`[Task ${task.id}] Completed in ${duration}ms`);
-    
+
+    const durationMs = Date.now() - startTime;
+    logger.info(`[Task ${task.id}] Completed in ${durationMs}ms`);
+
     // Event-driven MemoV snapshot
     await triggerMemoVSnapshot(task.id, 'task_complete');
-    
+
     return {
       taskId: task.id,
-      status: result.status === 'success' ? 'success' : 
+      status: result.status === 'success' ? 'success' :
               result.status === 'timeout' ? 'timeout' : 'failure',
       output: result.output,
       error: result.error,
+      failureClass: result.status !== 'success' ? classifyFailure(result.error || '') : undefined,
+      durationMs,
       timestamp: Date.now()
     };
-    
+
   } catch (error) {
-    const duration = Date.now() - startTime;
-    logger.error(`[Task ${task.id}] Failed after ${duration}ms:`, error);
-    
+    const durationMs = Date.now() - startTime;
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    const fc = classifyFailure(errorMsg);
+    logger.error(`[Task ${task.id}] Failed after ${durationMs}ms [${fc}]:`, error);
+
     return {
       taskId: task.id,
       status: 'failure',
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMsg,
+      failureClass: fc,
+      durationMs,
       timestamp: Date.now()
     };
   }
@@ -205,34 +238,53 @@ async function triggerMemoVSnapshot(taskId: string, event: string) {
   }
 }
 
-// ============ 重试逻辑 ============
+// ============ 重试逻辑（失败分类感知） ============
 async function executeWithRetry(task: Task, messageId: string, attempt = 1): Promise<TaskResult> {
   const result = await executeTask(task);
-  
-  if (result.status === 'failure' && attempt < RETRY_ATTEMPTS) {
-    logger.warn(`[Task ${task.id}] Retry ${attempt}/${RETRY_ATTEMPTS}`);
-    
-    // Exponential backoff
-    const delay = Math.pow(2, attempt) * 1000;
+
+  if (result.status !== 'failure') return result;
+
+  const fc = result.failureClass || 'UNKNOWN';
+  const config = RETRY_CONFIG[fc];
+
+  // PERMANENT → 不重试，直接 DLQ
+  if (config.maxRetries === 0) {
+    logger.error(`[Task ${task.id}] Permanent failure [${fc}], no retry → DLQ`);
+    await sendToDLQ(task, messageId, result, attempt, fc);
+    return result;
+  }
+
+  // 还有重试次数
+  if (attempt < config.maxRetries) {
+    const delay = Math.pow(2, attempt) * config.backoffBase;
+    logger.warn(`[Task ${task.id}] Retry ${attempt}/${config.maxRetries} [${fc}], backoff ${delay}ms`);
     await new Promise(resolve => setTimeout(resolve, delay));
-    
     return executeWithRetry(task, messageId, attempt + 1);
   }
-  
-  // 如果最终失败，发送到 DLQ
-  if (result.status === 'failure' && attempt >= RETRY_ATTEMPTS) {
-    await redis.xAdd(DLQ_STREAM, '*', {
-      task_id: task.id,
-      message_id: messageId,
-      error: result.error || 'unknown',
-      attempts: attempt.toString(),
-      timestamp: Date.now().toString()
-    });
-    
-    logger.error(`[Task ${task.id}] Moved to DLQ after ${attempt} attempts`);
-  }
-  
+
+  // 最终失败 → DLQ
+  await sendToDLQ(task, messageId, result, attempt, fc);
   return result;
+}
+
+async function sendToDLQ(
+  task: Task,
+  messageId: string,
+  result: TaskResult,
+  attempts: number,
+  failureClass: FailureClass,
+): Promise<void> {
+  await redis.xAdd(DLQ_STREAM, '*', {
+    task_id: task.id,
+    message_id: messageId,
+    error: result.error || 'unknown',
+    failure_class: failureClass,
+    attempts: attempts.toString(),
+    duration_ms: (result.durationMs || 0).toString(),
+    timestamp: Date.now().toString()
+  });
+
+  logger.error(`[Task ${task.id}] → DLQ [${failureClass}] after ${attempts} attempts`);
 }
 
 // ============ 主循环 ============
@@ -308,16 +360,19 @@ async function mainLoop() {
             try {
               const taskResult = await executeWithRetry(taskData, messageId);
               
-              // 推送结果
-              if (taskResult.status === 'success') {
-                await redis.xAdd(RESULT_STREAM, '*', {
-                  task_id: taskData.id,
-                  status: taskResult.status,
-                  output: taskResult.output || '',
-                  timestamp: taskResult.timestamp.toString()
-                });
-                logger.info(`[Task ${taskData.id}] Result pushed to ${RESULT_STREAM}`);
-              }
+              // 推送结果（成功和失败都推送，供治理层消费）
+              await redis.xAdd(RESULT_STREAM, '*', {
+                task_id: taskData.id,
+                agent_id: AGENT_ID,
+                status: taskResult.status,
+                output: taskResult.output || '',
+                error: taskResult.error || '',
+                failure_class: taskResult.failureClass || '',
+                duration_ms: (taskResult.durationMs || 0).toString(),
+                timestamp: taskResult.timestamp.toString()
+              });
+              logger.info(`[Task ${taskData.id}] Result pushed to ${RESULT_STREAM} (${taskResult.status})`);
+
               
               // XACK 确认消息（前）
               logger.info(`[Task ${taskData.id}] Acknowledging message: ${messageId}`);
@@ -528,9 +583,10 @@ async function reportHeartbeat() {
       timestamp: Date.now()
     };
     
-    // 推送心跳到 Redis
+    // 推送心跳到 Redis（含 active_tasks）
     await redis.xAdd('fsc:heartbeats', '*', {
       agent: AGENT_ID,
+      active_tasks: (MAX_CONCURRENT - semaphore.available()).toString(),
       metrics: JSON.stringify(metrics)
     });
     

@@ -1,0 +1,241 @@
+/**
+ * FSC-Mesh Quality Judge — 三重质量验证
+ *
+ * 基于 AXIOM 论文警告（LLM Judge 80% 误判率），采用三层验证：
+ * Layer 1: 自动化检查 (0-40分) — lint/test/typecheck/security
+ * Layer 2: 结构分析 (0-30分) — diff size/scope/deps/commit msg
+ * Layer 3: LLM Judge (0-30分) — 仅高风险任务，3 Judge 投票取中位数
+ *
+ * 总分 < 40: REJECT
+ * 总分 40-70: REVIEW
+ * 总分 > 70: APPROVE
+ */
+
+import type { RedisClientType } from 'redis';
+import type { QualityReport, QualityDetail, RiskLevel } from './types';
+
+const REVIEW_QUEUE = 'fsc:review_queue';
+
+interface JudgeInput {
+  taskId: string;
+  agentId: string;
+  gitDiff?: string;
+  testOutput?: string;
+  lintOutput?: string;
+  typecheckOutput?: string;
+  riskLevel: RiskLevel;
+  touchedFiles: string[];
+  allowedFiles?: string[];
+  commitMessage?: string;
+}
+
+export class QualityJudge {
+  constructor(private redis: RedisClientType) {}
+
+  /** 执行三层质量评估 */
+  async evaluate(input: JudgeInput): Promise<QualityReport> {
+    const details: QualityDetail[] = [];
+
+    // Layer 1: 自动化检查 (0-40)
+    const l1 = this.evaluateLayer1(input, details);
+
+    // Layer 2: 结构分析 (0-30)
+    const l2 = this.evaluateLayer2(input, details);
+
+    // Layer 3: LLM Judge (0-30) — 仅高风险
+    let l3 = 0;
+    if (input.riskLevel === 'high' || input.riskLevel === 'critical') {
+      l3 = await this.evaluateLayer3(input, details);
+    } else {
+      // 非高风险任务，Layer 3 按 Layer 1+2 比例推算
+      l3 = Math.round(((l1 + l2) / 70) * 30);
+      details.push({
+        check: 'llm_judge_skipped',
+        passed: true,
+        score: l3,
+        maxScore: 30,
+        message: `Low/medium risk: LLM judge skipped, estimated ${l3}/30`,
+      });
+    }
+
+    const totalScore = l1 + l2 + l3;
+    const decision = totalScore >= 70 ? 'APPROVE' : totalScore >= 40 ? 'REVIEW' : 'REJECT';
+
+    const report: QualityReport = {
+      taskId: input.taskId,
+      agentId: input.agentId,
+      layer1Score: l1,
+      layer2Score: l2,
+      layer3Score: l3,
+      totalScore,
+      decision,
+      details,
+      timestamp: Date.now(),
+    };
+
+    // REVIEW 的推入审查队列
+    if (decision === 'REVIEW') {
+      await this.redis.xAdd(REVIEW_QUEUE, '*', {
+        taskId: input.taskId,
+        agentId: input.agentId,
+        score: totalScore.toString(),
+        timestamp: Date.now().toString(),
+      });
+    }
+
+    return report;
+  }
+
+  // ============ Layer 1: 自动化检查 (0-40) ============
+  private evaluateLayer1(input: JudgeInput, details: QualityDetail[]): number {
+    let score = 0;
+
+    // lint 通过 (+10)
+    const lintPassed = !input.lintOutput || !input.lintOutput.includes('error');
+    details.push({
+      check: 'lint',
+      passed: lintPassed,
+      score: lintPassed ? 10 : 0,
+      maxScore: 10,
+      message: lintPassed ? 'No lint errors' : `Lint errors found`,
+    });
+    if (lintPassed) score += 10;
+
+    // 测试通过 (+15)
+    const testPassed = !input.testOutput ||
+      (input.testOutput.includes('pass') && !input.testOutput.includes('fail'));
+    details.push({
+      check: 'tests',
+      passed: testPassed,
+      score: testPassed ? 15 : 0,
+      maxScore: 15,
+      message: testPassed ? 'Tests passing' : 'Test failures detected',
+    });
+    if (testPassed) score += 15;
+
+    // 类型检查 (+10)
+    const typecheckPassed = !input.typecheckOutput ||
+      !input.typecheckOutput.includes('error TS');
+    details.push({
+      check: 'typecheck',
+      passed: typecheckPassed,
+      score: typecheckPassed ? 10 : 0,
+      maxScore: 10,
+      message: typecheckPassed ? 'Type check passed' : 'Type errors found',
+    });
+    if (typecheckPassed) score += 10;
+
+    // 无安全漏洞 (+5)
+    const noSecIssues = !input.gitDiff ||
+      !/(eval\s*\(|exec\s*\(|child_process|rm\s+-rf|password\s*=\s*['"])/i.test(input.gitDiff);
+    details.push({
+      check: 'security_scan',
+      passed: noSecIssues,
+      score: noSecIssues ? 5 : 0,
+      maxScore: 5,
+      message: noSecIssues ? 'No security issues' : 'Potential security issue in diff',
+    });
+    if (noSecIssues) score += 5;
+
+    return score;
+  }
+
+  // ============ Layer 2: 结构分析 (0-30) ============
+  private evaluateLayer2(input: JudgeInput, details: QualityDetail[]): number {
+    let score = 0;
+
+    // diff 大小合理 (+5, ≤500 行)
+    const diffLines = input.gitDiff ? input.gitDiff.split('\n').length : 0;
+    const sizeOk = diffLines <= 500;
+    details.push({
+      check: 'diff_size',
+      passed: sizeOk,
+      score: sizeOk ? 5 : Math.max(0, 5 - Math.floor((diffLines - 500) / 200)),
+      maxScore: 5,
+      message: `Diff: ${diffLines} lines (limit: 500)`,
+    });
+    if (sizeOk) score += 5;
+    else score += Math.max(0, 5 - Math.floor((diffLines - 500) / 200));
+
+    // 只改了指定文件 (+10)
+    if (input.allowedFiles && input.allowedFiles.length > 0) {
+      const outOfScope = input.touchedFiles.filter(f =>
+        !input.allowedFiles!.some(allowed => f.startsWith(allowed))
+      );
+      const scopeOk = outOfScope.length === 0;
+      details.push({
+        check: 'file_scope',
+        passed: scopeOk,
+        score: scopeOk ? 10 : 0,
+        maxScore: 10,
+        message: scopeOk ? 'All changes in scope' : `Out of scope: ${outOfScope.join(', ')}`,
+      });
+      if (scopeOk) score += 10;
+    } else {
+      score += 10; // 无限制 → 满分
+      details.push({ check: 'file_scope', passed: true, score: 10, maxScore: 10, message: 'No scope restriction' });
+    }
+
+    // 无未声明的依赖 (+10)
+    const hasNewDeps = input.gitDiff && /^\+.*(?:require|import)\s/.test(input.gitDiff);
+    const depsOk = !hasNewDeps;
+    details.push({
+      check: 'dependencies',
+      passed: depsOk,
+      score: depsOk ? 10 : 5,
+      maxScore: 10,
+      message: depsOk ? 'No new dependencies' : 'New imports detected (review needed)',
+    });
+    score += depsOk ? 10 : 5;
+
+    // commit message 规范 (+5)
+    const msgOk = !!input.commitMessage && input.commitMessage.length >= 10 && input.commitMessage.length <= 200;
+    details.push({
+      check: 'commit_message',
+      passed: msgOk,
+      score: msgOk ? 5 : 2,
+      maxScore: 5,
+      message: msgOk ? 'Commit message OK' : 'Commit message too short/long',
+    });
+    score += msgOk ? 5 : 2;
+
+    return score;
+  }
+
+  // ============ Layer 3: LLM Judge (0-30) ============
+  private async evaluateLayer3(input: JudgeInput, details: QualityDetail[]): Promise<number> {
+    // 占位实现——后续接入 LLM API
+    // 真实实现: 3 个 Judge Agent 独立评估，取中位数
+    // 使用廉价模型 (doubao/minimax) 评估
+
+    // 暂时基于 Layer 1+2 的综合启发式评分
+    const diffQuality = input.gitDiff ? Math.min(30, Math.round(input.gitDiff.length / 100)) : 15;
+    const hasTests = input.testOutput && input.testOutput.includes('pass');
+    const score = Math.min(30, diffQuality + (hasTests ? 10 : 0));
+
+    details.push({
+      check: 'llm_judge',
+      passed: score >= 15,
+      score,
+      maxScore: 30,
+      message: `LLM Judge score: ${score}/30 (heuristic mode — LLM integration pending)`,
+    });
+
+    return score;
+  }
+
+  /** 获取待审查队列长度 */
+  async getReviewQueueLength(): Promise<number> {
+    return this.redis.xLen(REVIEW_QUEUE);
+  }
+
+  /** 获取待审查任务 */
+  async getReviewQueue(count = 20): Promise<Array<{ taskId: string; agentId: string; score: number }>> {
+    const entries = await this.redis.xRange(REVIEW_QUEUE, '-', '+', { COUNT: count });
+    return entries.map(e => ({
+      taskId: e.message.taskId,
+      agentId: e.message.agentId,
+      score: parseInt(e.message.score),
+    }));
+  }
+}
