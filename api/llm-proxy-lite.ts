@@ -149,8 +149,11 @@ async function proxyRequest(provider: Provider, body: any): Promise<Response> {
     });
     const data: any = await resp.json();
     if (data.content) {
+      // 提取 text 类型内容块 (跳过 thinking 块)
+      const textBlock = data.content.find((c: any) => c.type === 'text');
+      const content = textBlock?.text || data.content[0]?.text || '';
       return Response.json({
-        choices: [{ message: { role: 'assistant', content: data.content[0]?.text || '' } }],
+        choices: [{ message: { role: 'assistant', content } }],
         model: data.model,
         usage: data.usage,
       });
