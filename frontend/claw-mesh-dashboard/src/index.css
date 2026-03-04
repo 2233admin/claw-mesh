@@ -1,68 +1,220 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Roboto+Flex:wght@400;500;600;700&display=swap');
+
+/* ============ Material Glass Design Tokens ============ */
 :root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
+  --bg-deep: #0a0a0f;
+  --bg-surface: rgba(255, 255, 255, 0.06);
+  --bg-surface-hover: rgba(255, 255, 255, 0.10);
+  --bg-glass: rgba(255, 255, 255, 0.08);
+  --border-glass: rgba(255, 255, 255, 0.12);
+  --border-glass-hover: rgba(255, 255, 255, 0.20);
 
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
+  --color-primary: #60a5fa;
+  --color-success: #34d399;
+  --color-warning: #fbbf24;
+  --color-error: #f87171;
+  --color-info: #a78bfa;
 
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
+  --text-primary: #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+
+  --font-heading: 'Roboto Flex', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  --blur-sm: blur(8px);
+  --blur-md: blur(16px) saturate(1.2);
+  --blur-lg: blur(24px) saturate(1.4);
+
+  --shadow-glass: 0 8px 32px rgba(0, 0, 0, 0.3);
+  --shadow-glass-sm: 0 4px 16px rgba(0, 0, 0, 0.2);
+  --shadow-glow-primary: 0 0 20px rgba(96, 165, 250, 0.15);
+  --shadow-glow-success: 0 0 20px rgba(52, 211, 153, 0.15);
+  --shadow-glow-error: 0 0 20px rgba(248, 113, 113, 0.15);
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+}
+
+/* ============ Base ============ */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-body);
+  background: var(--bg-deep);
+  color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-a:hover {
-  color: #535bf2;
-}
-
-body {
-  margin: 0;
-  display: flex;
-  place-items: center;
-  min-width: 320px;
-  min-height: 100vh;
+/* Subtle animated gradient background */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 80% 50% at 20% 40%, rgba(96, 165, 250, 0.06) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 80% 60%, rgba(167, 139, 250, 0.04) 0%, transparent 60%),
+    radial-gradient(ellipse 50% 30% at 50% 90%, rgba(52, 211, 153, 0.03) 0%, transparent 60%);
+  pointer-events: none;
+  z-index: 0;
 }
 
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
+#root {
+  position: relative;
+  z-index: 1;
 }
 
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
-  cursor: pointer;
-  transition: border-color 0.25s;
-}
-button:hover {
-  border-color: #646cff;
-}
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
+/* ============ Glass Components (GPU-accelerated) ============ */
+.glass-card {
+  background: var(--bg-glass);
+  backdrop-filter: var(--blur-md);
+  -webkit-backdrop-filter: var(--blur-md);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-glass);
+  transition: border-color 0.2s, box-shadow 0.2s;
+  /* P1 性能：CSS Containment + GPU 加速 */
+  contain: paint;
+  will-change: transform;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
+.glass-card:hover {
+  border-color: var(--border-glass-hover);
+}
+
+.glass-card-sm {
+  background: var(--bg-glass);
+  backdrop-filter: var(--blur-sm);
+  -webkit-backdrop-filter: var(--blur-sm);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-glass-sm);
+  contain: paint;
+}
+
+.glass-surface {
+  background: var(--bg-surface);
+  backdrop-filter: var(--blur-sm);
+  -webkit-backdrop-filter: var(--blur-sm);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-md);
+}
+
+/* P1 性能降级：低性能设备关闭 blur */
+@media (prefers-reduced-motion: reduce) {
+  .glass-card,
+  .glass-card-sm {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: rgba(30, 30, 40, 0.9);
   }
-  a:hover {
-    color: #747bff;
+  .animate-pulse-glow,
+  .animate-slide-up,
+  .animate-fade-in {
+    animation: none;
   }
-  button {
-    background-color: #f9f9f9;
-  }
+}
+
+/* ============ Scrollbar ============ */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* ============ Status Colors ============ */
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.status-online { background: var(--color-success); box-shadow: 0 0 8px rgba(52, 211, 153, 0.5); }
+.status-offline { background: var(--color-error); box-shadow: 0 0 8px rgba(248, 113, 113, 0.5); }
+.status-warning { background: var(--color-warning); box-shadow: 0 0 8px rgba(251, 191, 36, 0.5); }
+
+/* ============ Animations ============ */
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-pulse-glow { animation: pulse-glow 2s ease-in-out infinite; }
+.animate-slide-up { animation: slide-up 0.3s ease-out; }
+.animate-fade-in { animation: fade-in 0.2s ease-out; }
+
+/* ============ Typography ============ */
+.font-heading { font-family: var(--font-heading); }
+.font-mono { font-family: var(--font-mono); }
+
+/* ============ ReactFlow Overrides ============ */
+.react-flow__background {
+  background: transparent !important;
+}
+
+.react-flow__node {
+  background: var(--bg-glass) !important;
+  backdrop-filter: var(--blur-sm) !important;
+  border: 1px solid var(--border-glass) !important;
+  border-radius: var(--radius-md) !important;
+  color: var(--text-primary) !important;
+  font-family: var(--font-mono) !important;
+  font-size: 12px !important;
+}
+
+.react-flow__edge-path {
+  stroke: rgba(96, 165, 250, 0.4) !important;
+  stroke-width: 2 !important;
+}
+
+.react-flow__controls {
+  background: var(--bg-glass) !important;
+  backdrop-filter: var(--blur-sm) !important;
+  border: 1px solid var(--border-glass) !important;
+  border-radius: var(--radius-md) !important;
+}
+
+.react-flow__controls-button {
+  background: transparent !important;
+  border-color: var(--border-glass) !important;
+  color: var(--text-secondary) !important;
+  fill: var(--text-secondary) !important;
 }

@@ -12,7 +12,7 @@ export function useStreamingChat() {
   const [isOffline, setIsOffline] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const startStreaming = async (
     messages: any[],
