@@ -45,14 +45,13 @@ function loadProvidersSync(): Provider[] {
     });
   }
 
-  // 2. 从 openclaw.json 补充 (使用 Bun 原生文件 API)
+  // 2. 从 openclaw.json 补充
   const home = process.env.HOME || '/root';
   const configPath = `${home}/.openclaw/openclaw.json`;
-  const file = Bun.file(configPath);
 
-  if (file.size > 0) {
-    try {
-      const text = require('fs').readFileSync(configPath, 'utf-8');
+  try {
+    const { readFileSync } = require('node:fs');
+    const text = readFileSync(configPath, 'utf-8');
       const config = JSON.parse(text);
       const modelsSection = config.models || {};
       const ocProviders = modelsSection.providers || config.providers || {};
@@ -72,11 +71,8 @@ function loadProvidersSync(): Provider[] {
       }
       console.log(`[LLM Proxy] Loaded ${Object.keys(ocProviders).length} providers from ${configPath}`);
     } catch (e: any) {
-      console.error('[LLM Proxy] Config load error:', e.message);
+      console.error(`[LLM Proxy] Config load error: ${e.message} (path: ${configPath})`);
     }
-  } else {
-    console.log(`[LLM Proxy] Config not found: ${configPath}`);
-  }
 
   return providers;
 }
