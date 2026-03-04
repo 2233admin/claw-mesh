@@ -118,11 +118,14 @@ let totalReports = 0;
 
 // ============ Provider 路由 ============
 function findProvider(model: string): Provider | null {
+  const ml = model.toLowerCase();
+  // 精确匹配 (大小写不敏感)
   for (const p of providers) {
-    if (p.models.includes(model)) return p;
+    if (p.models.some(m => m.toLowerCase() === ml)) return p;
   }
+  // 模糊匹配 (大小写不敏感)
   for (const p of providers) {
-    if (p.models.some(m => model.includes(m) || m.includes(model))) return p;
+    if (p.models.some(m => ml.includes(m.toLowerCase()) || m.toLowerCase().includes(ml))) return p;
   }
   return providers[0] || null;
 }

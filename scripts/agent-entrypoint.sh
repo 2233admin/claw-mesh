@@ -13,10 +13,10 @@ log() { echo "[$(date '+%H:%M:%S')] $*"; }
 START_TIME=$(date +%s%3N 2>/dev/null || date +%s)
 
 # 1. 上报 Agent 启动
-log "Agent ${AGENT_ID:-$$} starting, model=${MODEL:-minimax-2.5}"
+log "Agent ${AGENT_ID:-$$} starting, model=${MODEL:-MiniMax-M2.5}"
 curl -sf -X POST "${PROXY_URL}/v1/report" \
   -H "Content-Type: application/json" \
-  -d "{\"task_id\":\"${TASK_ID:-unknown}\",\"agent_id\":\"${AGENT_ID:-$$}\",\"status\":\"started\",\"model\":\"${MODEL:-minimax-2.5}\",\"exit_code\":0}" \
+  -d "{\"task_id\":\"${TASK_ID:-unknown}\",\"agent_id\":\"${AGENT_ID:-$$}\",\"status\":\"started\",\"model\":\"${MODEL:-MiniMax-M2.5}\",\"exit_code\":0}" \
   > /dev/null 2>&1 || true
 
 # 2. 克隆代码库 (如果指定了 GIT_REPO)
@@ -47,13 +47,13 @@ case "${AGENT_TYPE:-api}" in
     ;;
   *)
     # 通过 LLM Proxy 调用廉价模型
-    log "Running via API (${MODEL:-minimax-2.5})"
+    log "Running via API (${MODEL:-MiniMax-M2.5})"
 
     # 安全地 JSON 编码任务内容
     TASK_CONTENT=$(cat "$TASK_FILE")
     JSON_PAYLOAD=$(cat <<JSONEOF
 {
-  "model": "${MODEL:-minimax-2.5}",
+  "model": "${MODEL:-MiniMax-M2.5}",
   "messages": [{"role": "user", "content": $(printf '%s' "$TASK_CONTENT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))' 2>/dev/null || echo '"task"')}],
   "max_tokens": ${MAX_TOKENS:-4000}
 }
@@ -121,7 +121,7 @@ REPORT_JSON=$(cat <<REPORTEOF
   "agent_id": "${AGENT_ID:-$$}",
   "status": "$STATUS",
   "exit_code": $EXIT_CODE,
-  "model": "${MODEL:-minimax-2.5}",
+  "model": "${MODEL:-MiniMax-M2.5}",
   "result_preview": "$PREVIEW",
   "duration_ms": $DURATION
 }
