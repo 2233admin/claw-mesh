@@ -9,7 +9,7 @@
  * 调用: POST http://10.10.0.1:3002/v1/chat/completions
  */
 
-const PORT = parseInt(Bun.env.LLM_PROXY_PORT || '3002');
+const PORT = parseInt(process.env.LLM_PROXY_PORT || '3002');
 
 // 模型提供商配置 (从环境变量或 openclaw.json 读取)
 interface Provider {
@@ -25,21 +25,21 @@ function loadProviders(): Provider[] {
   const providers: Provider[] = [];
 
   // 1. 环境变量优先
-  if (Bun.env.DOUBAO_API_KEY) {
+  if (process.env.DOUBAO_API_KEY) {
     providers.push({
       name: 'volcengine',
-      baseUrl: Bun.env.DOUBAO_ENDPOINT || 'https://ark.cn-beijing.volces.com/api/v3',
-      apiKey: Bun.env.DOUBAO_API_KEY,
+      baseUrl: process.env.DOUBAO_ENDPOINT || 'https://ark.cn-beijing.volces.com/api/v3',
+      apiKey: process.env.DOUBAO_API_KEY,
       models: ['doubao-seed-2.0-code', 'doubao-pro-32k', 'doubao-lite-32k'],
       api: 'openai',
     });
   }
 
-  if (Bun.env.MINIMAX_API_KEY) {
+  if (process.env.MINIMAX_API_KEY) {
     providers.push({
       name: 'minimax',
-      baseUrl: Bun.env.MINIMAX_ENDPOINT || 'https://api.minimax.chat/v1',
-      apiKey: Bun.env.MINIMAX_API_KEY,
+      baseUrl: process.env.MINIMAX_ENDPOINT || 'https://api.minimax.chat/v1',
+      apiKey: process.env.MINIMAX_API_KEY,
       models: ['minimax-2.5', 'abab6.5s-chat'],
       api: 'openai',
     });
@@ -47,7 +47,7 @@ function loadProviders(): Provider[] {
 
   // 2. 从 openclaw.json 补充
   try {
-    const home = Bun.env.HOME || '/root';
+    const home = process.env.HOME || '/root';
     const configPath = `${home}/.openclaw/openclaw.json`;
     const config = JSON.parse(require('fs').readFileSync(configPath, 'utf-8'));
     const modelsSection = config.models || {};
@@ -67,7 +67,7 @@ function loadProviders(): Provider[] {
         });
       }
     }
-  } catch { /* no config file */ }
+  } catch (e: any) { console.error('[LLM Proxy] Config load error:', e.message); }
 
   return providers;
 }
