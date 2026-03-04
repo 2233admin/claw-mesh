@@ -1,38 +1,47 @@
-# FSC Agent 执行镜像
-# Alpine + Node.js + Docker CLI
-# 用于 Ralph 循环中的 fresh-context agent 执行
+# FSC Agent 极简执行镜像
+# 目标: < 200MB, 支持 Claude Code / Gemini CLI / OpenCode / Zero
+# 用于 1000 Agent 并行编码场景
 
-FROM node:18-alpine
+FROM node:18-alpine AS base
 
-# 安装 Docker CLI（用于容器内执行 Docker 命令）
+# 单层安装，减少镜像层数
 RUN apk add --no-cache \
-    docker-cli \
     git \
     bash \
-    curl
+    curl \
+    openssh-client \
+    && npm install -g bun@latest \
+    && rm -rf /root/.npm /tmp/*
 
-# 设置工作目录
+# 非 root 用户运行
+RUN adduser -D -h /workspace agent
+USER agent
 WORKDIR /workspace
 
-# 复制 package.json 和依赖
-COPY package.json bun.lockb* ./
-RUN npm install -g bun && bun install
-
-# 复制源代码
-COPY . .
-
 # 环境变量
-ENV NODE_ENV=production
-ENV REDIS_HOST=10.10.0.1
-ENV REDIS_PORT=6379
-ENV MAX_CONCURRENT=10
+ENV NODE_ENV=production \
+    REDIS_HOST=10.10.0.1 \
+    REDIS_PORT=6379 \
+    REDIS_PASSWORD=fsc-mesh-2026 \
+    MAX_CONCURRENT=10 \
+    AGENT_ID=worker-default \
+    # 成本约束
+    MAX_TOKENS_PER_TASK=4000 \
+    HOURLY_COST_LIMIT=0.50 \
+    # 默认廉价模型
+    FSC_AGENT_TYPE=minimax \
+    FSC_MODEL=minimax-2.5
 
-# 健康检查
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:8080/health || exit 1
+# 健康检查 (轻量: 仅检查进程存活)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD pgrep -f "bun" > /dev/null || exit 1
 
-# 暴露端口（MCP 监控）
-EXPOSE 8080
+# 入口: 支持多种运行模式
+# - worker: FSC Worker Daemon (默认)
+# - task: 单任务执行后退出
+# - ralph: Ralph 迭代循环
+COPY --chown=agent:agent . .
+RUN bun install --production 2>/dev/null || true
 
-# 启动命令
-CMD ["bun", "run", "fsc/fsc-worker-daemon.ts"]
+ENTRYPOINT ["bun"]
+CMD ["run", "fsc/fsc-worker-daemon.ts"]

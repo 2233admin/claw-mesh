@@ -1,0 +1,28 @@
+# FSC 单任务 Agent 镜像 (更极简)
+# 目标: < 150MB, 执行单个编码任务后退出
+# 1000 个并行容器场景专用
+
+FROM node:18-alpine
+
+RUN apk add --no-cache git bash curl openssh-client \
+    && rm -rf /tmp/* /var/cache/apk/*
+
+RUN adduser -D -h /workspace agent
+USER agent
+WORKDIR /workspace
+
+# 任务通过环境变量注入
+ENV TASK_ID="" \
+    TASK_DESCRIPTION="" \
+    GIT_REPO="" \
+    GIT_BRANCH="main" \
+    AGENT_TYPE="minimax" \
+    MODEL="minimax-2.5" \
+    MAX_TOKENS=4000 \
+    REDIS_HOST=10.10.0.1 \
+    REDIS_PORT=6379 \
+    REDIS_PASSWORD=fsc-mesh-2026
+
+# 不安装 bun/项目依赖, 由 entrypoint 脚本按需安装
+COPY --chown=agent:agent scripts/agent-entrypoint.sh /usr/local/bin/
+ENTRYPOINT ["/usr/local/bin/agent-entrypoint.sh"]
