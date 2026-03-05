@@ -16,22 +16,16 @@
 
 import { createClient, type RedisClientType } from 'redis';
 import { FreeProviderPool } from './free-provider-pool';
+import { REDIS_URL } from '../config/redis';
 
 const PORT = parseInt(process.env.LLM_PROXY_PORT || '3002');
-
-// ============ Redis 连接 ============
-const REDIS_HOST = process.env.REDIS_HOST || '10.10.0.1';
-const REDIS_PORT = parseInt(process.env.REDIS_PORT || '6379');
-const REDIS_PASSWORD = process.env.REDIS_PASSWORD || 'fsc-mesh-2026';
 
 let redis: RedisClientType | null = null;
 let freePool: FreeProviderPool | null = null;
 
 async function getRedis(): Promise<RedisClientType> {
   if (redis && redis.isOpen) return redis;
-  redis = createClient({
-    url: `redis://:${REDIS_PASSWORD}@${REDIS_HOST}:${REDIS_PORT}`,
-  });
+  redis = createClient({ url: REDIS_URL });
   redis.on('error', (err) => console.error('[Redis] Error:', err.message));
   await redis.connect();
   console.log('[Redis] Connected');

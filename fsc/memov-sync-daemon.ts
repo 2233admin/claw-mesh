@@ -17,9 +17,7 @@ import { createHash } from 'crypto';
 import { readFile, writeFile } from 'fs/promises';
 
 // ============ 配置 ============
-const REDIS_HOST = process.env.REDIS_HOST || '10.10.0.1';
-const REDIS_PORT = parseInt(process.env.REDIS_PORT || '6379');
-const REDIS_PASSWORD = process.env.REDIS_PASSWORD || 'fsc-mesh-2026';
+import { REDIS_HOST, REDIS_PORT, REDIS_PASSWORD } from '../config/redis';
 const MEM_DIR = '.mem';
 const NODES = ['10.10.0.2', '10.10.0.3', '10.10.0.4'];
 const CONSUMER_GROUP = 'memov-sync';

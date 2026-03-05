@@ -14,9 +14,7 @@ import Redis from 'ioredis';
 import { decode } from '@msgpack/msgpack';
 
 // ============ 配置 ============
-const REDIS_HOST = process.env.REDIS_HOST || '10.10.0.1';
-const REDIS_PORT = parseInt(process.env.REDIS_PORT || '6379');
-const REDIS_PASSWORD = process.env.REDIS_PASSWORD || 'fsc-mesh-2026';
+import { REDIS_HOST, REDIS_PORT, REDIS_PASSWORD } from '../config/redis';
 const STAR_OFFICE_URL = process.env.STAR_OFFICE_URL || 'http://localhost:18791';
 const CONSUMER_GROUP = 'star-office-bridge';
 const CONSUMER_NAME = `bridge-${process.env.HOSTNAME || 'local'}`;

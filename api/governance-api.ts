@@ -17,17 +17,12 @@
 import { createClient } from 'redis';
 import { StreamTrimmer } from '../governance/stream-trimmer';
 import { decodeStreamMessage } from '../governance/stream-codec';
+import { REDIS_HOST, REDIS_PORT, redisConfig } from '../config/redis';
 
 const PORT = parseInt(process.env.GOVERNANCE_PORT || '3004');
-const REDIS_HOST = process.env.REDIS_HOST || '10.10.0.1';
-const REDIS_PORT = parseInt(process.env.REDIS_PORT || '6379');
-const REDIS_PASSWORD = process.env.REDIS_PASSWORD || 'fsc-mesh-2026';
 
 // ============ Redis ============
-const redis = createClient({
-  socket: { host: REDIS_HOST, port: REDIS_PORT },
-  password: REDIS_PASSWORD,
-});
+const redis = createClient(redisConfig());
 
 redis.on('error', (err) => console.error('[Redis]', err.message));
 await redis.connect();
