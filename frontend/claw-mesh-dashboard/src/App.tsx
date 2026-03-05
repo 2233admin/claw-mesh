@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
 import { StatsCards } from './components/StatsCards';
@@ -16,6 +16,10 @@ import {
   fetchQueueDepth,
   fetchWorkerLoad,
   fetchGovernanceSummary,
+  fetchFreeProviders,
+  addFreeProvider,
+  removeFreeProvider,
+  toggleFreeProvider,
   usePolling,
   useEventSocket,
   type NodeId,
@@ -35,6 +39,7 @@ function DataProvider({ children }: { children: React.ReactNode }) {
   const setPolicies = useGovernanceStore((s) => s.setPolicies);
   const setQuality = useGovernanceStore((s) => s.setQuality);
   const setEvolution = useGovernanceStore((s) => s.setEvolution);
+  const setFreeProviders = useGovernanceStore((s) => s.setFreeProviders);
 
   // 各节点健康检查 5s
   const nodeIds: NodeId[] = ['central', 'silicon', 'tokyo'];
@@ -56,7 +61,15 @@ function DataProvider({ children }: { children: React.ReactNode }) {
     setPolicies(data.policies);
     setQuality(data.quality);
     setEvolution(data.evolution.strategy, data.evolution.diversityIndex);
+    if (data.freeProviders) {
+      setFreeProviders(data.freeProviders.endpoints || [], data.freeProviders.summary || { total: 0, healthy: 0, open: 0, halfOpen: 0 });
+    }
   }, 10000);
+
+  // Free providers 单独 15s 轮询 (更频繁，熔断状态变化快)
+  usePolling(fetchFreeProviders, (data) => {
+    setFreeProviders(data.endpoints || [], data.summary || { total: 0, healthy: 0, open: 0, halfOpen: 0 });
+  }, 15000);
 
   // 实时事件 WebSocket
   useEventSocket('ws://10.10.0.1:3001/ws', 'memov:event', (data) => {
@@ -165,6 +178,171 @@ function AIView() {
   );
 }
 
+// ============ Free Provider 配置面板 ============
+const FREE_PRESETS = {
+  openrouter: {
+    label: 'OpenRouter',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    models: [
+      'stepfun/step-3.5-flash:free',
+      'meta-llama/llama-3.3-70b-instruct:free',
+      'mistralai/mistral-7b-instruct:free',
+      'google/gemma-2-9b-it:free',
+    ],
+  },
+  'nvidia-nim': {
+    label: 'NVIDIA NIM',
+    baseUrl: 'https://integrate.api.nvidia.com/v1',
+    models: [
+      'meta/llama-3.1-8b-instruct',
+      'nvidia/llama-3.1-nemotron-70b-instruct',
+    ],
+  },
+} as const;
+
+function FreeProviderConfig() {
+  const endpoints = useGovernanceStore((s) => s.freeProviders);
+  const [provider, setProvider] = useState<'openrouter' | 'nvidia-nim'>('openrouter');
+  const [model, setModel] = useState(FREE_PRESETS.openrouter.models[0]);
+  const [apiKey, setApiKey] = useState('');
+  const [adding, setAdding] = useState(false);
+
+  const preset = FREE_PRESETS[provider];
+
+  const handleProviderChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
+    const p = e.target.value as 'openrouter' | 'nvidia-nim';
+    setProvider(p);
+    setModel(FREE_PRESETS[p].models[0]);
+  }, []);
+
+  const handleAdd = useCallback(async () => {
+    if (!model) return;
+    setAdding(true);
+    try {
+      await addFreeProvider({ provider, baseUrl: preset.baseUrl, apiKey, model, enabled: true });
+      setApiKey('');
+    } catch (err) {
+      console.error('[FreeProvider] Add error:', err);
+    }
+    setAdding(false);
+  }, [provider, model, apiKey, preset.baseUrl]);
+
+  const handleRemove = useCallback(async (id: string) => {
+    try { await removeFreeProvider(id); } catch (err) { console.error('[FreeProvider] Remove error:', err); }
+  }, []);
+
+  const handleToggle = useCallback(async (id: string, enabled: boolean) => {
+    try { await toggleFreeProvider(id, enabled); } catch (err) { console.error('[FreeProvider] Toggle error:', err); }
+  }, []);
+
+  const circuitColor: Record<string, string> = {
+    closed: 'var(--color-success)',
+    'half-open': 'var(--color-warning)',
+    open: 'var(--color-error)',
+  };
+
+  const inputStyle = {
+    background: 'rgba(255,255,255,0.05)',
+    border: '1px solid rgba(255,255,255,0.1)',
+    color: 'var(--text-primary)',
+    borderRadius: '6px',
+    padding: '4px 8px',
+    fontSize: '11px',
+    outline: 'none',
+  } as const;
+
+  return (
+    <div className="glass-card p-4">
+      <div className="text-sm font-heading font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>
+        Free LLM Providers
+      </div>
+
+      {/* Add new endpoint */}
+      <div className="flex flex-wrap gap-2 mb-3">
+        <select value={provider} onChange={handleProviderChange} style={inputStyle}>
+          <option value="openrouter">OpenRouter</option>
+          <option value="nvidia-nim">NVIDIA NIM</option>
+        </select>
+        <select value={model} onChange={(e) => setModel(e.target.value)} style={inputStyle}>
+          {preset.models.map((m) => (
+            <option key={m} value={m}>{m}</option>
+          ))}
+        </select>
+        <input
+          type="password"
+          placeholder="API Key (optional for some)"
+          value={apiKey}
+          onChange={(e) => setApiKey(e.target.value)}
+          style={{ ...inputStyle, flex: '1', minWidth: '160px' }}
+        />
+        <button
+          onClick={handleAdd}
+          disabled={adding}
+          className="text-[11px] px-3 py-1 rounded-md transition-colors"
+          style={{
+            background: 'rgba(96,165,250,0.15)',
+            color: 'var(--color-primary)',
+            border: '1px solid rgba(96,165,250,0.2)',
+            cursor: adding ? 'wait' : 'pointer',
+            opacity: adding ? 0.6 : 1,
+          }}
+        >
+          {adding ? 'Adding...' : 'Add'}
+        </button>
+      </div>
+
+      {/* Configured endpoints */}
+      <div className="space-y-1">
+        {endpoints.length === 0 && (
+          <div className="text-[10px] text-center py-3" style={{ color: 'var(--text-muted)' }}>
+            No free providers configured yet
+          </div>
+        )}
+        {endpoints.map((ep) => (
+          <div key={ep.id} className="flex items-center gap-2 px-2 py-1.5 rounded-md"
+            style={{ background: 'rgba(255,255,255,0.03)' }}>
+            <span className="w-2 h-2 rounded-full flex-shrink-0"
+              style={{ background: ep.enabled ? (circuitColor[ep.circuit.status] || 'var(--text-muted)') : 'var(--text-muted)' }} />
+            <div className="flex-1 min-w-0">
+              <span className="text-[10px] font-mono truncate block" style={{ color: 'var(--text-primary)' }}>
+                {ep.model}
+              </span>
+              <span className="text-[9px]" style={{ color: 'var(--text-muted)' }}>{ep.provider}</span>
+            </div>
+            <span className="text-[9px] font-mono" style={{ color: circuitColor[ep.circuit.status] }}>
+              {ep.circuit.status}
+            </span>
+            <button
+              onClick={() => handleToggle(ep.id, !ep.enabled)}
+              className="text-[9px] px-1.5 py-0.5 rounded"
+              style={{
+                background: ep.enabled ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
+                color: ep.enabled ? 'var(--color-success)' : 'var(--color-error)',
+                cursor: 'pointer',
+                border: 'none',
+              }}
+            >
+              {ep.enabled ? 'ON' : 'OFF'}
+            </button>
+            <button
+              onClick={() => handleRemove(ep.id)}
+              className="text-[9px] px-1.5 py-0.5 rounded"
+              style={{
+                background: 'rgba(239,68,68,0.1)',
+                color: 'var(--color-error)',
+                cursor: 'pointer',
+                border: 'none',
+              }}
+            >
+              Del
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function SettingsView() {
   const nodes = useMeshStore((s) => s.nodes);
   const { can: canViewSettings } = usePermission('VIEW_SETTINGS');
@@ -237,6 +415,9 @@ function SettingsView() {
           </div>
         )}
       </div>
+
+      {/* Free Provider 配置 */}
+      <FreeProviderConfig />
 
       {/* 宪法审计日志 */}
       {auditLog.length > 0 && (

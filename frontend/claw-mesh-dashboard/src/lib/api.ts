@@ -226,4 +226,64 @@ export async function fetchGovernanceSummary(): Promise<GovernanceSummary> {
   return apiFetch(`${GOV_BASE}/summary`);
 }
 
+// ============ Free Provider API ============
+
+export interface FreeProviderData {
+  endpoints: Array<{
+    id: string;
+    provider: string;
+    baseUrl: string;
+    apiKey: string;
+    model: string;
+    enabled: boolean;
+    addedAt: number;
+    circuit: {
+      status: 'closed' | 'open' | 'half-open';
+      failures: number;
+      lastFailure: number;
+      lastSuccess: number;
+      totalRequests: number;
+      totalFailures: number;
+    };
+  }>;
+  summary: {
+    total: number;
+    healthy: number;
+    open: number;
+    halfOpen: number;
+  };
+}
+
+export async function fetchFreeProviders(): Promise<FreeProviderData> {
+  return apiFetch(`${GOV_BASE}/free-providers`);
+}
+
+export async function addFreeProvider(data: {
+  provider: string;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  enabled?: boolean;
+}): Promise<{ ok: boolean }> {
+  return apiFetch(`${GOV_BASE}/free-providers`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function removeFreeProvider(id: string): Promise<{ ok: boolean }> {
+  return apiFetch(`${GOV_BASE}/free-providers/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function toggleFreeProvider(id: string, enabled: boolean): Promise<{ ok: boolean }> {
+  return apiFetch(`${GOV_BASE}/free-providers/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
+}
+
 export { ENDPOINTS, type NodeId };

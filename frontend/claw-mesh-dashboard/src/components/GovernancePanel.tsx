@@ -62,6 +62,7 @@ function BudgetPanel() {
     premium: 'var(--color-success)',
     standard: 'var(--color-primary)',
     economy: 'var(--color-warning)',
+    free: 'var(--color-accent, #c084fc)',
     paused: 'var(--color-error)',
   };
 
@@ -246,6 +247,72 @@ function PolicyPanel() {
   );
 }
 
+// ============ Free Providers Panel ============
+function FreeProvidersPanel() {
+  const endpoints = useGovernanceStore((s) => s.freeProviders);
+  const summary = useGovernanceStore((s) => s.freeProviderSummary);
+
+  const circuitColor: Record<string, string> = {
+    closed: 'var(--color-success)',
+    'half-open': 'var(--color-warning)',
+    open: 'var(--color-error)',
+  };
+
+  return (
+    <GlassCard title="Free Providers" icon="F">
+      <div className="space-y-2">
+        {/* Summary bar */}
+        <div className="flex items-center gap-3 text-[10px] font-mono px-2 py-1.5 rounded"
+          style={{ background: 'rgba(255,255,255,0.03)' }}>
+          <span style={{ color: 'var(--text-muted)' }}>Total: {summary.total}</span>
+          <span style={{ color: 'var(--color-success)' }}>Healthy: {summary.healthy}</span>
+          {summary.halfOpen > 0 && <span style={{ color: 'var(--color-warning)' }}>Half-Open: {summary.halfOpen}</span>}
+          {summary.open > 0 && <span style={{ color: 'var(--color-error)' }}>Open: {summary.open}</span>}
+        </div>
+
+        {/* Endpoint list */}
+        <div className="space-y-1 max-h-40 overflow-y-auto">
+          {endpoints.length === 0 && (
+            <div className="text-[10px] text-center py-3" style={{ color: 'var(--text-muted)' }}>
+              No free endpoints configured — add via Settings
+            </div>
+          )}
+          {endpoints.map((ep) => (
+            <div key={ep.id} className="flex items-center gap-2 px-2 py-1.5 rounded-md"
+              style={{ background: 'rgba(255,255,255,0.03)' }}>
+              {/* Circuit status dot */}
+              <span className="w-2 h-2 rounded-full flex-shrink-0"
+                style={{ background: ep.enabled ? (circuitColor[ep.circuit.status] || 'var(--text-muted)') : 'var(--text-muted)' }} />
+              <div className="flex-1 min-w-0">
+                <div className="text-[10px] font-mono truncate" style={{ color: 'var(--text-primary)' }}>
+                  {ep.model}
+                </div>
+                <div className="flex gap-2 text-[9px]" style={{ color: 'var(--text-muted)' }}>
+                  <span>{ep.provider}</span>
+                  <span>Req: {ep.circuit.totalRequests}</span>
+                  <span>Fail: {ep.circuit.totalFailures}</span>
+                </div>
+              </div>
+              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded"
+                style={{
+                  color: circuitColor[ep.circuit.status] || 'var(--text-muted)',
+                  background: 'rgba(255,255,255,0.05)',
+                }}>
+                {ep.circuit.status.toUpperCase()}
+              </span>
+              {!ep.enabled && (
+                <span className="text-[9px] px-1 rounded" style={{ background: 'rgba(239,68,68,0.15)', color: 'var(--color-error)' }}>
+                  OFF
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </GlassCard>
+  );
+}
+
 // ============ Main Governance View ============
 export function GovernancePanel() {
   return (
@@ -257,8 +324,9 @@ export function GovernancePanel() {
       </div>
       <div className="grid grid-cols-2 gap-4">
         <TrustLeaderboard />
-        <PolicyPanel />
+        <FreeProvidersPanel />
       </div>
+      <PolicyPanel />
       <AuditPanel />
     </div>
   );

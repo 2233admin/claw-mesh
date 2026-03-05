@@ -44,6 +44,31 @@ export interface QualitySummary {
   avgScore: number;
 }
 
+export interface FreeEndpointStatus {
+  id: string;
+  provider: 'openrouter' | 'nvidia-nim' | 'custom';
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  enabled: boolean;
+  addedAt: number;
+  circuit: {
+    status: 'closed' | 'open' | 'half-open';
+    failures: number;
+    lastFailure: number;
+    lastSuccess: number;
+    totalRequests: number;
+    totalFailures: number;
+  };
+}
+
+export interface FreeProviderSummary {
+  total: number;
+  healthy: number;
+  open: number;
+  halfOpen: number;
+}
+
 interface GovernanceState {
   trustLeaderboard: TrustEntry[];
   auditLog: AuditEntry[];
@@ -52,6 +77,8 @@ interface GovernanceState {
   quality: QualitySummary;
   evolutionStrategy: string;
   diversityIndex: number;
+  freeProviders: FreeEndpointStatus[];
+  freeProviderSummary: FreeProviderSummary;
 
   setTrustLeaderboard: (entries: TrustEntry[]) => void;
   addAuditEntries: (entries: AuditEntry[]) => void;
@@ -59,6 +86,7 @@ interface GovernanceState {
   setPolicies: (rules: PolicyRule[]) => void;
   setQuality: (q: QualitySummary) => void;
   setEvolution: (strategy: string, diversity: number) => void;
+  setFreeProviders: (endpoints: FreeEndpointStatus[], summary: FreeProviderSummary) => void;
 }
 
 export const useGovernanceStore = create<GovernanceState>((set) => ({
@@ -69,6 +97,8 @@ export const useGovernanceStore = create<GovernanceState>((set) => ({
   quality: { total: 0, approved: 0, review: 0, rejected: 0, avgScore: 0 },
   evolutionStrategy: 'balanced',
   diversityIndex: 1.0,
+  freeProviders: [],
+  freeProviderSummary: { total: 0, healthy: 0, open: 0, halfOpen: 0 },
 
   setTrustLeaderboard: (entries) => set({ trustLeaderboard: entries }),
   addAuditEntries: (entries) => set((s) => ({
@@ -78,4 +108,5 @@ export const useGovernanceStore = create<GovernanceState>((set) => ({
   setPolicies: (policies) => set({ policies }),
   setQuality: (quality) => set({ quality }),
   setEvolution: (strategy, diversity) => set({ evolutionStrategy: strategy, diversityIndex: diversity }),
+  setFreeProviders: (endpoints, summary) => set({ freeProviders: endpoints, freeProviderSummary: summary }),
 }));
