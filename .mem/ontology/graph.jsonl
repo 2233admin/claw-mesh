@@ -7,3 +7,11 @@
 {"type":"entity","id":"entity-1772520225076","name":"容器OOM","category":"error","attributes":{"story_id":"manual","pattern":"OOM|out of memory|killed process"},"timestamp":1772520225076}
 {"type":"entity","id":"entity-1772520225076","name":"--memory=2g","category":"fix","attributes":{"confidence":93},"timestamp":1772520225076}
 {"type":"relation","id":"relation-1772520225076","from":"entity-1772520225076","to":"entity-1772520225076","relation_type":"fixes","confidence":0.93,"timestamp":1772520225076}
+{"type":"entity","id":"entity-1772671852730","name":"服务未启动","category":"error","attributes":{"story_id":"test-task-1","pattern":"ECONNREFUSED|connection refused"},"timestamp":1772671852730}
+{"type":"entity","id":"entity-1772671852730","name":"docker-compose up -d","category":"fix","attributes":{"confidence":90},"timestamp":1772671852730}
+{"type":"relation","id":"relation-1772671852730","from":"entity-1772671852730","to":"entity-1772671852730","relation_type":"fixes","confidence":0.9,"timestamp":1772671852730}
+{"type":"entity","id":"entity-1772671852730","name":"容器OOM","category":"error","attributes":{"story_id":"task-oom","pattern":"OOM|out of memory|killed process"},"timestamp":1772671852730}
+{"type":"entity","id":"entity-1772671852730","name":"--memory=2g","category":"fix","attributes":{"confidence":93},"timestamp":1772671852730}
+{"type":"relation","id":"relation-1772671852730","from":"entity-1772671852730","to":"entity-1772671852730","relation_type":"fixes","confidence":0.93,"timestamp":1772671852730}
+{"type":"entity","id":"entity-1772671852741","name":"Success: test-task-1","category":"success","attributes":{"story_id":"test-task-1","fix":"Fixed by restarting Redis","timestamp":1772671852741},"timestamp":1772671852741}
+{"type":"relation","id":"relation-1772671852744","from":"entity-1772671852730","to":"entity-1772671852741","relation_type":"resolved_by","confidence":1,"timestamp":1772671852744}

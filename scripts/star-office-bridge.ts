@@ -11,6 +11,7 @@
  */
 
 import Redis from 'ioredis';
+import { decode } from '@msgpack/msgpack';
 
 // ============ 配置 ============
 const REDIS_HOST = process.env.REDIS_HOST || '10.10.0.1';
@@ -352,6 +353,16 @@ function parseStreamFields(fields: string[]): Record<string, string> {
   const data: Record<string, string> = {};
   for (let i = 0; i < fields.length; i += 2) {
     data[fields[i]] = fields[i + 1];
+  }
+  // msgpack 双格式解码: 新 worker 用 msgpack 编码, 旧 worker 用 JSON
+  if (data.encoding === 'msgpack' && data.payload) {
+    const buf = Buffer.from(data.payload, 'base64');
+    const decoded = decode(buf) as Record<string, unknown>;
+    const result: Record<string, string> = {};
+    for (const [k, v] of Object.entries(decoded)) {
+      result[k] = String(v ?? '');
+    }
+    return result;
   }
   return data;
 }
