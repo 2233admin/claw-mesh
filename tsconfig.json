@@ -1,0 +1,36 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "dist",
+    "rootDir": ".",
+    "types": ["bun-types"],
+    "lib": ["ESNext"],
+    "noUnusedLocals": false,
+    "noUnusedParameters": false
+  },
+  "include": [
+    "api/**/*.ts",
+    "config/**/*.ts",
+    "fsc/**/*.ts",
+    "governance/**/*.ts",
+    "scripts/**/*.ts",
+    "c/fsc-codec/ffi-bun.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "rust",
+    "c/fsc-codec/*.c",
+    "**/*.test.ts"
+  ]
+}
