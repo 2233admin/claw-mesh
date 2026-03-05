@@ -9,12 +9,12 @@
  */
 
 import { encode, decode } from '@msgpack/msgpack';
-import { FscCodec } from '../c/fsc-codec/ffi-bun';
 import { resolve } from 'path';
 
-// 尝试加载 C codec，失败则 fallback 到纯 TS
-let codec: FscCodec | null = null;
+// 动态加载 C codec — 避免 bun:ffi 在测试环境下导致 import 失败
+let codec: any = null;
 try {
+  const { FscCodec } = await import('../c/fsc-codec/ffi-bun');
   const libPath = resolve(import.meta.dir, '../c/fsc-codec/libfsc-ffi.so');
   codec = new FscCodec(libPath);
   console.log(`[StreamCodec] C FFI loaded: ${codec.version()}`);
