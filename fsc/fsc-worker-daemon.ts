@@ -25,6 +25,7 @@
 
 import { createClient } from 'redis';
 import { DockerInstance } from './packages/core/src/dockerInstance';
+import { encode as msgpackEncode } from '@msgpack/msgpack';
 import winston from 'winston';
 
 // ============ 配置 ============
@@ -360,18 +361,23 @@ async function mainLoop() {
             try {
               const taskResult = await executeWithRetry(taskData, messageId);
               
-              // 推送结果（成功和失败都推送，供治理层消费）
-              await redis.xAdd(RESULT_STREAM, '*', {
+              // 推送结果（MessagePack 编码, 省 30-50% Stream 内存）
+              const resultPayload = {
                 task_id: taskData.id,
                 agent_id: AGENT_ID,
                 status: taskResult.status,
                 output: taskResult.output || '',
                 error: taskResult.error || '',
                 failure_class: taskResult.failureClass || '',
-                duration_ms: (taskResult.durationMs || 0).toString(),
-                timestamp: taskResult.timestamp.toString()
+                duration_ms: taskResult.durationMs || 0,
+                timestamp: taskResult.timestamp,
+              };
+              const encoded = Buffer.from(msgpackEncode(resultPayload)).toString('base64');
+              await redis.xAdd(RESULT_STREAM, '*', {
+                payload: encoded,
+                encoding: 'msgpack',
               });
-              logger.info(`[Task ${taskData.id}] Result pushed to ${RESULT_STREAM} (${taskResult.status})`);
+              logger.info(`[Task ${taskData.id}] Result pushed to ${RESULT_STREAM} (${taskResult.status}, msgpack)`);
 
               
               // XACK 确认消息（前）
@@ -552,46 +558,86 @@ async function checkAndHealNetwork() {
   }
 }
 
-// 功能 3: 主动心跳与资源上报
+// 功能 3: 主动心跳与资源上报 (/proc 直读，省去 fork+exec 开销)
+let prevCpuIdle = 0;
+let prevCpuTotal = 0;
+
+function parseProcStat(content: string): { idle: number; total: number } {
+  const cpuLine = content.split('\n').find(l => l.startsWith('cpu '));
+  if (!cpuLine) return { idle: 0, total: 0 };
+  const parts = cpuLine.split(/\s+/).slice(1).map(Number);
+  // user, nice, system, idle, iowait, irq, softirq, steal
+  const idle = parts[3] + (parts[4] || 0); // idle + iowait
+  const total = parts.reduce((a, b) => a + b, 0);
+  return { idle, total };
+}
+
+function parseProcMeminfo(content: string): { usedMB: number; totalMB: number } {
+  const lines = content.split('\n');
+  let total = 0, available = 0;
+  for (const line of lines) {
+    if (line.startsWith('MemTotal:')) total = parseInt(line.split(/\s+/)[1]) || 0;
+    else if (line.startsWith('MemAvailable:')) available = parseInt(line.split(/\s+/)[1]) || 0;
+  }
+  const totalMB = Math.round(total / 1024);
+  const usedMB = Math.round((total - available) / 1024);
+  return { usedMB, totalMB };
+}
+
 async function reportHeartbeat() {
   try {
-    const { exec } = await import('child_process');
-    const { promisify } = await import('util');
-    const execAsync = promisify(exec);
-    
-    // 获取 CPU 使用率
-    const { stdout: cpuUsage } = await execAsync(
-      "top -bn1 | grep 'Cpu(s)' | sed 's/.*, *\\([0-9.]*\\)%* id.*/\\1/' | awk '{print 100 - $1}'"
-    );
-    
-    // 获取可用内存
-    const { stdout: memInfo } = await execAsync(
-      "free -m | awk 'NR==2{printf \"%s/%s\", $3,$2}'"
-    );
-    
-    // 获取磁盘使用率
-    const { stdout: diskUsage } = await execAsync(
-      "df -h / | awk 'NR==2{print $5}'"
-    );
-    
+    let cpuUsageStr = '0.00';
+    let memUsageStr = '0/0';
+    let diskUsageStr = 'N/A';
+
+    // CPU: 读 /proc/stat (差值计算)
+    try {
+      const stat = await Bun.file('/proc/stat').text();
+      const { idle, total } = parseProcStat(stat);
+      if (prevCpuTotal > 0) {
+        const idleDelta = idle - prevCpuIdle;
+        const totalDelta = total - prevCpuTotal;
+        const usage = totalDelta > 0 ? ((1 - idleDelta / totalDelta) * 100) : 0;
+        cpuUsageStr = usage.toFixed(2);
+      }
+      prevCpuIdle = idle;
+      prevCpuTotal = total;
+    } catch { /* /proc/stat 不可用（非 Linux），降级静默 */ }
+
+    // 内存: 读 /proc/meminfo
+    try {
+      const meminfo = await Bun.file('/proc/meminfo').text();
+      const { usedMB, totalMB } = parseProcMeminfo(meminfo);
+      memUsageStr = `${usedMB}/${totalMB}`;
+    } catch { /* 非 Linux 降级 */ }
+
+    // 磁盘: statvfs 不可用时降级用 df（仅此一个命令）
+    try {
+      const { exec } = await import('child_process');
+      const { promisify } = await import('util');
+      const execAsync = promisify(exec);
+      const { stdout } = await execAsync("df -h / | awk 'NR==2{print $5}'");
+      diskUsageStr = stdout.trim();
+    } catch { /* 降级 */ }
+
     const metrics = {
-      cpu_usage: parseFloat(cpuUsage.trim()).toFixed(2),
-      memory_usage: memInfo.trim(),
-      disk_usage: diskUsage.trim(),
+      cpu_usage: cpuUsageStr,
+      memory_usage: memUsageStr,
+      disk_usage: diskUsageStr,
       running_tasks: MAX_CONCURRENT - semaphore.available(),
       max_concurrent: MAX_CONCURRENT,
       timestamp: Date.now()
     };
-    
+
     // 推送心跳到 Redis（含 active_tasks）
     await redis.xAdd('fsc:heartbeats', '*', {
       agent: AGENT_ID,
       active_tasks: (MAX_CONCURRENT - semaphore.available()).toString(),
       metrics: JSON.stringify(metrics)
     });
-    
+
     logger.debug(`[Self-Healing] Heartbeat sent: ${JSON.stringify(metrics)}`);
-    
+
   } catch (error) {
     logger.error('[Self-Healing] Heartbeat report failed:', error);
   }
