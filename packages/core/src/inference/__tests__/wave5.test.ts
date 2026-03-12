@@ -5,6 +5,7 @@ import { describe, it, expect } from 'vitest'
 import {
   findSpeculativePairs,
   DEFAULT_SPECULATIVE_CONFIG,
+  optimalGamma,
 } from '../speculative-decoder'
 import type { SpeculativePair } from '../speculative-decoder'
 import {
@@ -123,6 +124,39 @@ describe('DEFAULT_SPECULATIVE_CONFIG', () => {
     expect(DEFAULT_SPECULATIVE_CONFIG.max_rejections).toBe(3)
     expect(DEFAULT_SPECULATIVE_CONFIG.min_acceptance_rate).toBe(0.3)
     expect(DEFAULT_SPECULATIVE_CONFIG.temperature).toBe(0.7)
+    expect(DEFAULT_SPECULATIVE_CONFIG.adaptive_gamma).toBe(true)
+    expect(DEFAULT_SPECULATIVE_CONFIG.alpha_ema_factor).toBe(0.3)
+  })
+})
+
+describe('optimalGamma — γ*(α) ≈ -1/ln(α)', () => {
+  it('returns 1 for very low acceptance rate', () => {
+    expect(optimalGamma(0.01)).toBe(1)
+    expect(optimalGamma(0.1)).toBe(1) // -1/ln(0.1) ≈ 0.43 → clamped to 1
+  })
+
+  it('returns ~2-3 for α=0.7', () => {
+    const g = optimalGamma(0.7)
+    expect(g).toBeGreaterThanOrEqual(2)
+    expect(g).toBeLessThanOrEqual(3)
+  })
+
+  it('returns ~9-10 for α=0.9', () => {
+    const g = optimalGamma(0.9)
+    expect(g).toBeGreaterThanOrEqual(9)
+    expect(g).toBeLessThanOrEqual(10)
+  })
+
+  it('returns 16 for very high acceptance rate', () => {
+    expect(optimalGamma(0.99)).toBe(16)
+  })
+
+  it('is monotonically increasing with α', () => {
+    const alphas = [0.3, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95]
+    const gammas = alphas.map(optimalGamma)
+    for (let i = 1; i < gammas.length; i++) {
+      expect(gammas[i]).toBeGreaterThanOrEqual(gammas[i - 1])
+    }
   })
 })
 

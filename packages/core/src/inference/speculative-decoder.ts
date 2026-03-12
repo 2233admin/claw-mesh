@@ -11,13 +11,18 @@
  *     - On rejection: resample from max(0, P_target(x) - P_draft(x)) (normalized)
  *     - All tokens after first rejection are discarded
  *
- * Expected accepted tokens per step: γ * acceptance_rate
- * Speedup: (γ * α + 1) / (γ * t_draft/t_target + 1)
+ * Expected accepted tokens per step (cascading rejection / geometric model):
+ *   E[tokens] = (1 - α^{γ+1}) / (1 - α)   (NOT γ*α — that ignores cascade)
+ * Speedup: E[tokens] / (γ * t_draft/t_target + 1)
  *   where α = acceptance rate, t_draft/t_target = time ratio
  *
+ * Optimal γ* (transcendental equation, approximate solution):
+ *   γ*(α) ≈ -1 / ln(α)
+ *   α=0.5 → γ*≈1.4, α=0.7 → γ*≈2.8, α=0.9 → γ*≈9.5
+ *
  * For Ollama 7B (15 tps) drafting for vLLM 72B (150 tps):
- *   t_draft/t_target ≈ 0.1, with α ≈ 0.7 and γ = 5:
- *   speedup ≈ (5*0.7+1) / (5*0.1+1) = 4.5/1.5 = 3.0x
+ *   t_draft/t_target ≈ 0.1, with α ≈ 0.7 and adaptive γ = 3:
+ *   E[tokens] = (1-0.7^4)/(1-0.7) = 2.83, speedup ≈ 2.83/1.3 = 2.18x
  */
 
 import type {
@@ -32,7 +37,7 @@ import type {
 // ─── Configuration ───
 
 export interface SpeculativeConfig {
-  /** Number of draft tokens to generate per step (γ). Higher = more throughput if acceptance is high. */
+  /** Initial draft tokens per step (γ). Overridden by adaptive_gamma when enabled. */
   draft_length: number            // default 5
   /** Maximum consecutive rejections before falling back to target-only. */
   max_rejections: number          // default 3
@@ -40,6 +45,10 @@ export interface SpeculativeConfig {
   min_acceptance_rate: number     // default 0.3
   /** Temperature alignment: draft and target must use same temperature for valid rejection sampling. */
   temperature: number             // default 0.7
+  /** Enable adaptive γ: adjust draft_length based on running acceptance rate using γ*(α) ≈ -1/ln(α). */
+  adaptive_gamma: boolean         // default true
+  /** EMA smoothing factor for acceptance rate tracking (0-1, higher = more responsive). */
+  alpha_ema_factor: number        // default 0.3
 }
 
 export const DEFAULT_SPECULATIVE_CONFIG: SpeculativeConfig = {
@@ -47,6 +56,15 @@ export const DEFAULT_SPECULATIVE_CONFIG: SpeculativeConfig = {
   max_rejections: 3,
   min_acceptance_rate: 0.3,
   temperature: 0.7,
+  adaptive_gamma: true,
+  alpha_ema_factor: 0.3,
+}
+
+/** Compute optimal γ from acceptance rate: γ*(α) ≈ -1/ln(α), clamped to [1, 16]. */
+export function optimalGamma(alpha: number): number {
+  if (alpha <= 0.01) return 1
+  if (alpha >= 0.99) return 16
+  return Math.max(1, Math.min(16, Math.floor(-1 / Math.log(alpha))))
 }
 
 // ─── Draft/Target engine pair ───
@@ -105,6 +123,10 @@ export async function speculativeDecode(
   let totalDraftCount = 0
   let consecutiveRejections = 0
   let fallbackToTarget = false
+  let alphaEma = 0.7 // initial EMA estimate of acceptance rate
+  let currentGamma = config.adaptive_gamma
+    ? optimalGamma(alphaEma)
+    : config.draft_length
   const outputParts: string[] = []
 
   // Build conversation context that grows as we generate
@@ -123,10 +145,10 @@ export async function speculativeDecode(
       break
     }
 
-    // Step 1: Draft γ tokens with small model
+    // Step 1: Draft γ tokens with small model (adaptive γ)
     const draft = await draftTokens(
       pair.draft, pair.draft_model, contextMessages,
-      config.draft_length, config.temperature,
+      currentGamma, config.temperature,
     )
     totalDraftTime += draft.draft_time_ms
 
@@ -178,6 +200,13 @@ export async function speculativeDecode(
     }
 
     acceptedCount += acceptedInStep
+
+    // Update adaptive γ via EMA of step-level acceptance rate
+    if (config.adaptive_gamma && draft.tokens.length > 0) {
+      const stepAlpha = acceptedInStep / draft.tokens.length
+      alphaEma = config.alpha_ema_factor * stepAlpha + (1 - config.alpha_ema_factor) * alphaEma
+      currentGamma = optimalGamma(alphaEma)
+    }
 
     // Update context with generated tokens
     const newContent = outputParts.slice(-acceptedInStep - 1).join('')
