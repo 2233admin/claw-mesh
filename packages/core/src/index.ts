@@ -19,5 +19,11 @@ export {
   registerEngine, deregisterEngine, listEngines, findEnginesByModel,
   healthCheckEngine, healthCheckAll,
   trackEngine, untrackEngine, startInferenceHeartbeat, stopInferenceHeartbeat, getTrackedEngines,
+  speculativeDecode, findSpeculativePairs, DEFAULT_SPECULATIVE_CONFIG,
+  prefillDecodeInference, buildPrefillDecodePool, DEFAULT_PD_CONFIG,
+  WasiNNRuntime, DEFAULT_WASI_NN_CONFIG,
 } from './inference'
-export type { LiteLLMClientConfig } from './inference'
+export type {
+  LiteLLMClientConfig, SpeculativeConfig, SpeculativePair,
+  PrefillDecodeConfig, PrefillDecodePool, WasiNNConfig, WasiNNBackendType,
+} from './inference'
