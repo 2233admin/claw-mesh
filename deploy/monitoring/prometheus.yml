@@ -3,6 +3,9 @@ global:
   scrape_interval: 30s
   evaluation_interval: 30s
 
+rule_files:
+  - /etc/prometheus/alerting-rules.yml
+
 scrape_configs:
   # ─── SUPER node (local) ───
   - job_name: 'super-node'

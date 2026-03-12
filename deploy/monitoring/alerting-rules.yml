@@ -1,0 +1,124 @@
+groups:
+  - name: claw-mesh-nodes
+    interval: 30s
+    rules:
+      # Node heartbeat
+      - alert: NodeDown
+        expr: up{job=~"super-node|mesh-nodes"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Node {{ $labels.node }} is down"
+          description: "Node {{ $labels.node }} ({{ $labels.instance }}) has been unreachable for >2 minutes."
+
+      # High CPU
+      - alert: HighCPUUsage
+        expr: |
+          100 - (
+            avg by (instance, node) (
+              rate(node_cpu_seconds_total{mode="idle"}[5m])
+            ) * 100
+          ) > 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU on {{ $labels.node }}"
+          description: "CPU usage on {{ $labels.node }} ({{ $labels.instance }}) is {{ printf \"%.1f\" $value }}% for >5 minutes."
+
+      # Low memory
+      - alert: LowMemoryAvailable
+        expr: |
+          (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 < 10
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low memory on {{ $labels.node }}"
+          description: "Available memory on {{ $labels.node }} is {{ printf \"%.1f\" $value }}% (<10%)."
+
+      # Disk usage
+      - alert: HighDiskUsage
+        expr: |
+          100 - (
+            (node_filesystem_avail_bytes{fstype!~"tmpfs|fuse.lxcfs|squashfs"} /
+             node_filesystem_size_bytes{fstype!~"tmpfs|fuse.lxcfs|squashfs"}) * 100
+          ) > 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High disk usage on {{ $labels.node }}"
+          description: "Disk {{ $labels.mountpoint }} on {{ $labels.node }} is {{ printf \"%.1f\" $value }}% full."
+
+  - name: claw-mesh-gpu
+    interval: 30s
+    rules:
+      # GPU VRAM OOM
+      - alert: GPUVRAMCritical
+        expr: |
+          (
+            nvidia_gpu_memory_used_bytes /
+            nvidia_gpu_memory_total_bytes
+          ) * 100 > 95
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "GPU VRAM near OOM on {{ $labels.node }}"
+          description: "GPU {{ $labels.gpu }} VRAM usage is {{ printf \"%.1f\" $value }}% (>95%)."
+
+  - name: claw-mesh-inference
+    interval: 30s
+    rules:
+      # vLLM offline
+      - alert: vLLMOffline
+        expr: up{job="vllm"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "vLLM inference engine is offline"
+          description: "vLLM at {{ $labels.instance }} has been unreachable for >2 minutes."
+
+      # SGLang offline
+      - alert: SGLangOffline
+        expr: up{job="sglang"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "SGLang inference engine is offline"
+          description: "SGLang at {{ $labels.instance }} has been unreachable for >2 minutes."
+
+      # High inference error rate
+      - alert: InferenceHighErrorRate
+        expr: |
+          (
+            rate(vllm:request_failure_total[5m]) /
+            (rate(vllm:request_success_total[5m]) + rate(vllm:request_failure_total[5m]) + 1e-10)
+          ) * 100 > 5
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High inference error rate"
+          description: "Inference error rate is {{ printf \"%.1f\" $value }}% (>5%) over the last 5 minutes."
+
+  - name: claw-mesh-gateway
+    interval: 30s
+    rules:
+      # LiteLLM high error rate
+      - alert: LiteLLMHighErrorRate
+        expr: |
+          (
+            rate(litellm_request_total{status=~"5.."}[5m]) /
+            (rate(litellm_request_total[5m]) + 1e-10)
+          ) * 100 > 5
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "LiteLLM gateway high error rate"
+          description: "LiteLLM error rate is {{ printf \"%.1f\" $value }}% over the last 5 minutes."

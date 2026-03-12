@@ -9,9 +9,21 @@
 #   docker run -v $(pwd)/config.yaml:/app/config.yaml \
 #     -p 4000:4000 ghcr.io/berriai/litellm:main-latest \
 #     --config /app/config.yaml
+#
+# Model alias routing priority:
+#   qwen-72b     → vLLM(GPU) > SGLang(GPU) > Ollama(SUPER) > doubao-seed(cloud)
+#   qwen-7b      → Ollama 中央 > 硅谷 > 东京 (latency-based)
+#   speculative  → draft=qwen-7b(local) + target=qwen-72b(local), TS path annotation
+#
+# Rate limits:
+#   local tier   — unlimited
+#   cloud tier   — 100 RPM / 200k TPM
 
 model_list:
-  # ═══ Local GPU engines (SUPER RTX 5090) ═══
+
+  # ═══════════════════════════════════════════════
+  # GPU engines — vLLM & SGLang on SUPER RTX 5090
+  # ═══════════════════════════════════════════════
 
   - model_name: vllm/qwen-72b
     litellm_params:
@@ -20,6 +32,8 @@ model_list:
       api_key: "none"
     model_info:
       max_tokens: 32768
+      tier: local
+      engine: vllm
 
   - model_name: sglang/qwen-72b
     litellm_params:
@@ -28,8 +42,26 @@ model_list:
       api_key: "none"
     model_info:
       max_tokens: 32768
+      tier: local
+      engine: sglang
 
-  # ═══ CPU node models (Ollama) ═══
+  # ═══════════════════════════════════════════════
+  # Ollama — SUPER localhost (draft model for speculative decoding)
+  # ═══════════════════════════════════════════════
+
+  - model_name: ollama/qwen-7b-super
+    litellm_params:
+      model: ollama/qwen2.5-coder:7b
+      api_base: http://localhost:11434
+    model_info:
+      max_tokens: 8192
+      tier: local
+      engine: ollama
+      node: super
+
+  # ═══════════════════════════════════════════════
+  # Ollama — CPU nodes (中央/硅谷/东京)
+  # ═══════════════════════════════════════════════
 
   - model_name: ollama/qwen-7b
     litellm_params:
@@ -37,6 +69,9 @@ model_list:
       api_base: http://10.10.0.1:11434
     model_info:
       max_tokens: 8192
+      tier: local
+      engine: ollama
+      node: central
 
   - model_name: ollama/qwen-7b-sv
     litellm_params:
@@ -44,6 +79,9 @@ model_list:
       api_base: http://10.10.0.2:11434
     model_info:
       max_tokens: 8192
+      tier: local
+      engine: ollama
+      node: silicon-valley
 
   - model_name: ollama/qwen-7b-tk
     litellm_params:
@@ -51,29 +89,161 @@ model_list:
       api_base: http://10.10.0.3:11434
     model_info:
       max_tokens: 8192
+      tier: local
+      engine: ollama
+      node: tokyo
 
-  # ═══ Cloud fallbacks ═══
+  # ═══════════════════════════════════════════════
+  # Cloud fallbacks
+  # ═══════════════════════════════════════════════
 
   - model_name: doubao-seed
     litellm_params:
       model: volcengine/doubao-seed-2.0-pro
       api_key: os.environ/VOLCENGINE_API_KEY
+      rpm: 100
+      tpm: 200000
     model_info:
       max_tokens: 32768
+      tier: cloud
+      engine: volcengine
 
   - model_name: minimax
     litellm_params:
       model: minimax/M2.5
       api_key: os.environ/MINIMAX_API_KEY
+      rpm: 100
+      tpm: 200000
     model_info:
       max_tokens: 16384
+      tier: cloud
+      engine: minimax
+
+  # ═══════════════════════════════════════════════
+  # Alias group: qwen-72b
+  # Latency-based routing across GPU engines → Ollama SUPER → cloud
+  # ═══════════════════════════════════════════════
+
+  - model_name: qwen-72b
+    litellm_params:
+      model: vllm/qwen-72b
+    model_info:
+      max_tokens: 32768
+      tier: local
+      alias: true
+
+  - model_name: qwen-72b
+    litellm_params:
+      model: sglang/qwen-72b
+    model_info:
+      max_tokens: 32768
+      tier: local
+      alias: true
+
+  - model_name: qwen-72b
+    litellm_params:
+      model: ollama/qwen-7b-super
+      # lower weight — only used when GPU engines are saturated/down
+      weight: 0.1
+    model_info:
+      max_tokens: 8192
+      tier: local
+      alias: true
+
+  # ═══════════════════════════════════════════════
+  # Alias group: qwen-7b
+  # Latency-based load balancing across all Ollama CPU nodes
+  # ═══════════════════════════════════════════════
+
+  - model_name: qwen-7b
+    litellm_params:
+      model: ollama/qwen2.5-coder:7b
+      api_base: http://localhost:11434
+      api_key: "none"
+    model_info:
+      max_tokens: 8192
+      tier: local
+
+  - model_name: qwen-7b
+    litellm_params:
+      model: ollama/qwen2.5-coder:7b
+      api_base: http://10.10.0.1:11434
+      api_key: "none"
+    model_info:
+      max_tokens: 8192
+      tier: local
+
+  - model_name: qwen-7b
+    litellm_params:
+      model: ollama/qwen2.5-coder:7b
+      api_base: http://10.10.0.2:11434
+      api_key: "none"
+    model_info:
+      max_tokens: 8192
+      tier: local
+
+  - model_name: qwen-7b
+    litellm_params:
+      model: ollama/qwen2.5-coder:7b
+      api_base: http://10.10.0.3:11434
+      api_key: "none"
+    model_info:
+      max_tokens: 8192
+      tier: local
+
+  # ═══════════════════════════════════════════════
+  # Speculative decoding group
+  #
+  # TypeScript claw-mesh path uses metadata fields:
+  #   x-speculative-draft  → draft model endpoint
+  #   x-speculative-target → target model endpoint
+  #
+  # Request with model="speculative/qwen" and the TS
+  # speculative-decode worker reads these annotations
+  # to split draft+verify calls, then merges tokens.
+  # ═══════════════════════════════════════════════
+
+  - model_name: speculative/qwen
+    litellm_params:
+      model: openai/Qwen/Qwen2.5-72B-Instruct
+      api_base: http://localhost:8000/v1
+      api_key: "none"
+    model_info:
+      max_tokens: 32768
+      tier: local
+      speculative: true
+      speculative_draft_model: ollama/qwen2.5-coder:7b
+      speculative_draft_api_base: http://localhost:11434
+      speculative_draft_max_tokens: 4
+      # TS worker reads these via /model/info endpoint and
+      # handles the draft→verify→merge loop itself
+      ts_speculative_path: true
+
+
+router_settings:
+  routing_strategy: latency-based-routing
+
+  # How many seconds of latency history to keep per model
+  routing_strategy_args:
+    ttl: 60
+    lowest_latency_buffer: 0.05   # 5% buffer before switching
+
+  # Retry failed model before moving to next in group
+  num_retries: 1
+  retry_after: 0
+
+  # Health check — probe each backend every 30s
+  # Unhealthy backends are removed from rotation automatically
+  enable_pre_call_checks: true
+  health_check_interval: 30
+
 
 litellm_settings:
-  # Rate limiting
-  max_budget: 50.0          # $50/day budget cap
+  # Budget cap (cloud-only spend; local has no cost)
+  max_budget: 50.0
   budget_duration: 1d
 
-  # Caching (Redis-backed)
+  # Caching (Redis-backed, shared across cluster)
   cache: true
   cache_params:
     type: redis
@@ -82,22 +252,108 @@ litellm_settings:
     password: fsc-mesh-2026
     ttl: 3600
 
-  # Retry & fallback
+  # Retry & fallback chain
   num_retries: 2
   request_timeout: 60
+
   fallbacks:
+    # GPU engines → Ollama SUPER → cloud
     - vllm/qwen-72b:
       - sglang/qwen-72b
-      - ollama/qwen-7b
+      - ollama/qwen-7b-super
       - doubao-seed
     - sglang/qwen-72b:
       - vllm/qwen-72b
+      - ollama/qwen-7b-super
+      - doubao-seed
+    # Ollama CPU nodes fall back to each other then cloud
+    - ollama/qwen-7b:
+      - ollama/qwen-7b-sv
+      - ollama/qwen-7b-tk
+      - ollama/qwen-7b-super
+      - doubao-seed
+    - ollama/qwen-7b-sv:
+      - ollama/qwen-7b
+      - ollama/qwen-7b-tk
+      - ollama/qwen-7b-super
+      - doubao-seed
+    - ollama/qwen-7b-tk:
+      - ollama/qwen-7b
+      - ollama/qwen-7b-sv
+      - ollama/qwen-7b-super
+      - doubao-seed
+    # Alias groups
+    - qwen-72b:
+      - doubao-seed
+    - qwen-7b:
+      - doubao-seed
+    - speculative/qwen:
+      - qwen-72b
       - doubao-seed
 
   # Logging
   success_callback: ["redis"]
   failure_callback: ["redis"]
 
+
+# ═══════════════════════════════════════════════
+# Health check endpoints
+# Exposed at: GET /health
+#             GET /health/liveliness
+#             GET /health/readiness
+# Per-backend status: GET /health/services
+# ═══════════════════════════════════════════════
+health_check:
+  # vLLM (SUPER)
+  - api_base: http://localhost:8000/v1
+    model: openai/Qwen/Qwen2.5-72B-Instruct
+    api_key: "none"
+  # SGLang (SUPER)
+  - api_base: http://localhost:8001/v1
+    model: openai/Qwen/Qwen2.5-72B-Instruct
+    api_key: "none"
+  # Ollama SUPER
+  - api_base: http://localhost:11434
+    model: ollama/qwen2.5-coder:7b
+  # Ollama 中央
+  - api_base: http://10.10.0.1:11434
+    model: ollama/qwen2.5-coder:7b
+  # Ollama 硅谷
+  - api_base: http://10.10.0.2:11434
+    model: ollama/qwen2.5-coder:7b
+  # Ollama 东京
+  - api_base: http://10.10.0.3:11434
+    model: ollama/qwen2.5-coder:7b
+
+
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
   database_url: os.environ/LITELLM_DATABASE_URL  # optional: PostgreSQL for analytics
+
+  # Rate limiting per model tier
+  # local tier — no limit enforced here (RPM/TPM set to very high)
+  # cloud tier — 100 RPM / 200k TPM (set on individual litellm_params above)
+  default_team_settings:
+    - team_id: local-tier
+      models:
+        - vllm/qwen-72b
+        - sglang/qwen-72b
+        - ollama/qwen-7b-super
+        - ollama/qwen-7b
+        - ollama/qwen-7b-sv
+        - ollama/qwen-7b-tk
+        - qwen-72b
+        - qwen-7b
+        - speculative/qwen
+      max_budget: null        # unlimited spend (no cost)
+      rpm_limit: null         # unlimited requests/min
+      tpm_limit: null         # unlimited tokens/min
+
+    - team_id: cloud-tier
+      models:
+        - doubao-seed
+        - minimax
+      max_budget: 50.0
+      budget_duration: 1d
+      rpm_limit: 100
+      tpm_limit: 200000
