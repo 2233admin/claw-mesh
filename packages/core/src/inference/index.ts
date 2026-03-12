@@ -9,3 +9,5 @@ export { prefillDecodeInference, buildPrefillDecodePool, DEFAULT_PD_CONFIG } fro
 export type { PrefillDecodeConfig, PrefillDecodePool } from './prefill-decode-router'
 export { WasiNNRuntime, DEFAULT_WASI_NN_CONFIG } from './wasi-nn-runtime'
 export type { WasiNNConfig, WasiNNBackendType } from './wasi-nn-runtime'
+export { speculativeInference, probeNativeSpeculation, vllmSpeculativeArgs, superNodeSpecConfig } from './native-speculative'
+export type { NativeSpecConfig, NativeSpecStatus } from './native-speculative'

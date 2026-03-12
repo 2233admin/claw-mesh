@@ -11,6 +11,8 @@ export type { TaskRunner, AgentHandle, ExecResult, ResourceSpec, RuntimeMetrics 
 
 // Scheduler
 export { filterDevices, scoreDevice, pickDevice } from './scheduler'
+export { pickRegion, buildRegionSummary, hierarchicalPick, ModelHashRing } from './scheduler'
+export type { RegionSummary, RegionAssignment } from './scheduler'
 
 // Inference
 export {
@@ -22,8 +24,10 @@ export {
   speculativeDecode, findSpeculativePairs, DEFAULT_SPECULATIVE_CONFIG,
   prefillDecodeInference, buildPrefillDecodePool, DEFAULT_PD_CONFIG,
   WasiNNRuntime, DEFAULT_WASI_NN_CONFIG,
+  speculativeInference, probeNativeSpeculation, vllmSpeculativeArgs, superNodeSpecConfig,
 } from './inference'
 export type {
   LiteLLMClientConfig, SpeculativeConfig, SpeculativePair,
   PrefillDecodeConfig, PrefillDecodePool, WasiNNConfig, WasiNNBackendType,
+  NativeSpecConfig, NativeSpecStatus,
 } from './inference'
