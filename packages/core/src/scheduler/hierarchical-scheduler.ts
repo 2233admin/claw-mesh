@@ -51,9 +51,9 @@ export interface RegionSummary {
   /** Highest trust level available in region */
   max_trust_level: 'trusted' | 'verified' | 'community'
   /** Platforms available in this region */
-  platforms: Set<string>
+  platforms: Set<string> | string[]
   /** Runtimes available in this region */
-  runtimes: Set<string>
+  runtimes: Set<string> | string[]
   /** Last summary update (unix ms) */
   last_updated: number
   /** Regional scheduler endpoint */
@@ -76,8 +76,9 @@ export class ModelHashRing {
     this.vnodes = vnodes
   }
 
-  /** Add a region to the hash ring with virtual nodes. */
+  /** Add a region to the hash ring with virtual nodes (idempotent). */
   addRegion(region_id: string): void {
+    this.removeRegion(region_id)
     for (let i = 0; i < this.vnodes; i++) {
       const hash = fnv1a(`${region_id}:${i}`)
       this.ring.push({ hash, region_id })
@@ -136,7 +137,7 @@ function fnv1a(str: string): number {
   let hash = 0x811c9dc5
   for (let i = 0; i < str.length; i++) {
     hash ^= str.charCodeAt(i)
-    hash = (hash * 0x01000193) >>> 0
+    hash = Math.imul(hash, 0x01000193) >>> 0
   }
   return hash
 }
@@ -156,14 +157,18 @@ const TRUST_RANK: Record<string, number> = {
 function scoreRegion(region: RegionSummary, task: TaskRequirement): number | null {
   // Hard constraint checks on aggregates
   if (task.required_platforms && task.required_platforms.length > 0) {
-    if (!task.required_platforms.some(p => region.platforms.has(p))) return null
+    const plats = region.platforms instanceof Set ? region.platforms : new Set(region.platforms)
+    if (!task.required_platforms.some(p => plats.has(p))) return null
   }
 
   if (task.required_gpu && region.total_vram_mb === 0) return null
 
   if (task.min_vram_mb !== undefined && region.available_vram_mb < task.min_vram_mb) return null
 
-  if (task.required_runtime && !region.runtimes.has(task.required_runtime)) return null
+  if (task.required_runtime) {
+    const rts = region.runtimes instanceof Set ? region.runtimes : new Set(region.runtimes)
+    if (!rts.has(task.required_runtime)) return null
+  }
 
   if (task.required_trust !== undefined) {
     const reqRank = TRUST_RANK[task.required_trust] ?? 0
@@ -247,6 +252,7 @@ export function buildRegionSummary(
   endpoint: string,
   devices: DeviceCapability[],
   activeTaskCounts: Map<string, number>,
+  activeVramMb?: Map<string, number>,
 ): RegionSummary {
   const online = devices.filter(d => d.can_run_tasks)
   const platforms = new Set<string>()
@@ -267,7 +273,8 @@ export function buildRegionSummary(
 
     const vram = d.gpus.reduce((sum, g) => sum + g.vram_mb, 0)
     totalVram += vram
-    availVram += vram // simplified; real impl would subtract in-use VRAM
+    const usedVram = activeVramMb?.get(d.device_id) ?? 0
+    availVram += Math.max(0, vram - usedVram)
 
     totalMem += d.memory_total_mb
 

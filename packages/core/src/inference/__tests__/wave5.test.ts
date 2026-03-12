@@ -229,9 +229,11 @@ describe('WasiNNRuntime', () => {
   })
 
   it('loadModel returns false for non-existent path', () => {
+    process.env.CLAW_MESH_DEV = '1'
     const nn = new WasiNNRuntime()
     expect(nn.loadModel('/nonexistent/model.gguf')).toBe(false)
     expect(nn.listModels()).toHaveLength(0)
+    delete process.env.CLAW_MESH_DEV
   })
 
   it('unloadModel returns false for unknown alias', () => {

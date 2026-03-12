@@ -26,7 +26,22 @@ import type {
   InferenceBackend,
   TokenUsage,
 } from '../types/inference'
-import { existsSync } from 'fs'
+import { existsSync, realpathSync } from 'fs'
+import { resolve, normalize } from 'path'
+
+const ALLOWED_BIN_RE = /^[a-zA-Z0-9_/.\-\\:]+$/
+const ALLOWED_MODEL_DIRS = ['/opt/claw-mesh/models', '/var/lib/claw-mesh/models']
+
+function validateBinPath(bin: string): void {
+  if (!ALLOWED_BIN_RE.test(bin)) throw new Error(`Invalid binary path: ${bin}`)
+}
+
+function validateModelPath(modelPath: string): void {
+  const resolved = resolve(normalize(modelPath))
+  if (!ALLOWED_MODEL_DIRS.some(dir => resolved.startsWith(dir)) && !process.env.CLAW_MESH_DEV) {
+    throw new Error(`Model path must be under allowed directory: ${resolved}`)
+  }
+}
 
 // ─── Configuration ───
 
@@ -128,6 +143,7 @@ export class WasiNNRuntime {
 
   /** Register a GGUF model for inference. */
   loadModel(modelPath: string, backend?: WasiNNBackendType, alias?: string): boolean {
+    validateModelPath(modelPath)
     if (!existsSync(modelPath)) return false
 
     const name = alias ?? modelPath.split(/[/\\]/).pop()?.replace(/\.gguf$/, '') ?? 'model'
@@ -212,7 +228,8 @@ export class WasiNNRuntime {
       const totalMs = Date.now() - startTime
 
       if (proc.exitCode !== 0) {
-        return errorResponse(requestId, startTime, stderr.slice(0, 200))
+        // Don't leak internal paths/details in error response
+        return errorResponse(requestId, startTime, 'Inference process failed')
       }
 
       // Parse output — expect either raw text or JSON
@@ -255,6 +272,7 @@ function buildWasiNNArgs(
   temperature: number,
   stop?: string[],
 ): string[] {
+  validateBinPath(config.wasmedge_bin)
   const args = [
     config.wasmedge_bin,
     '--dir', '.:.',
@@ -267,7 +285,11 @@ function buildWasiNNArgs(
     ?? '/opt/claw-mesh/wasm/llama-chat.wasm'
 
   if (existsSync(harnessPath)) {
-    args.push(harnessPath)
+    const resolved = resolve(normalize(harnessPath))
+    if (!resolved.startsWith('/opt/claw-mesh/') && !process.env.CLAW_MESH_DEV) {
+      throw new Error(`Harness must be under /opt/claw-mesh/: ${resolved}`)
+    }
+    args.push(resolved)
   }
 
   // Pass inference parameters as env-style args

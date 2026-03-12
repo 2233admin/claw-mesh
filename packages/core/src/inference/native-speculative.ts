@@ -76,6 +76,7 @@ export async function probeNativeSpeculation(
 
   try {
     // vLLM exposes speculation config via /v1/models or /health
+    validateEndpoint(engine.endpoint)
     const resp = await fetch(`${engine.endpoint}/v1/models`, {
       signal: AbortSignal.timeout(5000),
     })
@@ -142,9 +143,11 @@ export async function speculativeInference(
     e.requires_gpu
   )
 
-  for (const engine of gpuEngines) {
-    const nativeStatus = await probeNativeSpeculation(engine)
-    if (nativeStatus.native_supported) {
+  // Probe all GPU engines in parallel (not sequential)
+  const probes = await Promise.all(gpuEngines.map(e => probeNativeSpeculation(e)))
+  for (let i = 0; i < gpuEngines.length; i++) {
+    if (probes[i].native_supported) {
+      const engine = gpuEngines[i]
       // Native speculation is active — just send the request normally.
       // vLLM handles draft/verify internally at GPU level.
       const model = engine.loaded_models.find(m =>
@@ -222,6 +225,23 @@ export function superNodeSpecConfig(): NativeSpecConfig {
   }
 }
 
+// ─── Endpoint validation (SSRF prevention) ───
+
+const BLOCKED_HOSTS = new Set([
+  '169.254.169.254', 'metadata.google.internal',
+  '0.0.0.0', '127.0.0.1', '[::1]', 'localhost',
+])
+
+function validateEndpoint(endpoint: string): void {
+  const url = new URL(endpoint)
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error(`Invalid endpoint protocol: ${url.protocol}`)
+  }
+  if (BLOCKED_HOSTS.has(url.hostname)) {
+    throw new Error(`Blocked endpoint host: ${url.hostname}`)
+  }
+}
+
 // ─── Helpers ───
 
 async function executeDirectInference(
@@ -230,7 +250,9 @@ async function executeDirectInference(
   request: InferenceRequest,
 ): Promise<InferenceResponse> {
   const startTime = Date.now()
-  const requestId = `spec-native-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  const requestId = `spec-native-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`
+
+  validateEndpoint(engine.endpoint)
 
   const messages = request.messages ?? (request.prompt
     ? [{ role: 'user' as const, content: request.prompt }]
@@ -257,9 +279,14 @@ async function executeDirectInference(
     return errorResponse(`${engine.backend} ${resp.status}`, requestId, engine, model, totalMs)
   }
 
-  const data = await resp.json() as {
+  let data: {
     choices?: Array<{ message?: { content?: string }; finish_reason?: string }>
     usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
+  }
+  try {
+    data = await resp.json()
+  } catch {
+    return errorResponse('Invalid JSON from engine', requestId, engine, model, totalMs)
   }
 
   const choice = data.choices?.[0]
