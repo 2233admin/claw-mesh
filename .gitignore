@@ -17,3 +17,4 @@ AGENTS.md
 
 # Rust build
 rust/*/target/
+experiments/iroh-mesh/target/

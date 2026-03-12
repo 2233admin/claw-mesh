@@ -1,0 +1,103 @@
+# LiteLLM Proxy Configuration for claw-mesh
+# Deploy on SUPER (10.10.0.5) — unified gateway for all inference engines
+#
+# Usage:
+#   pip install 'litellm[proxy]'
+#   litellm --config config.yaml --port 4000
+#
+# Or via Docker:
+#   docker run -v $(pwd)/config.yaml:/app/config.yaml \
+#     -p 4000:4000 ghcr.io/berriai/litellm:main-latest \
+#     --config /app/config.yaml
+
+model_list:
+  # ═══ Local GPU engines (SUPER RTX 5090) ═══
+
+  - model_name: vllm/qwen-72b
+    litellm_params:
+      model: openai/Qwen/Qwen2.5-72B-Instruct
+      api_base: http://localhost:8000/v1
+      api_key: "none"
+    model_info:
+      max_tokens: 32768
+
+  - model_name: sglang/qwen-72b
+    litellm_params:
+      model: openai/Qwen/Qwen2.5-72B-Instruct
+      api_base: http://localhost:8001/v1
+      api_key: "none"
+    model_info:
+      max_tokens: 32768
+
+  # ═══ CPU node models (Ollama) ═══
+
+  - model_name: ollama/qwen-7b
+    litellm_params:
+      model: ollama/qwen2.5-coder:7b
+      api_base: http://10.10.0.1:11434
+    model_info:
+      max_tokens: 8192
+
+  - model_name: ollama/qwen-7b-sv
+    litellm_params:
+      model: ollama/qwen2.5-coder:7b
+      api_base: http://10.10.0.2:11434
+    model_info:
+      max_tokens: 8192
+
+  - model_name: ollama/qwen-7b-tk
+    litellm_params:
+      model: ollama/qwen2.5-coder:7b
+      api_base: http://10.10.0.3:11434
+    model_info:
+      max_tokens: 8192
+
+  # ═══ Cloud fallbacks ═══
+
+  - model_name: doubao-seed
+    litellm_params:
+      model: volcengine/doubao-seed-2.0-pro
+      api_key: os.environ/VOLCENGINE_API_KEY
+    model_info:
+      max_tokens: 32768
+
+  - model_name: minimax
+    litellm_params:
+      model: minimax/M2.5
+      api_key: os.environ/MINIMAX_API_KEY
+    model_info:
+      max_tokens: 16384
+
+litellm_settings:
+  # Rate limiting
+  max_budget: 50.0          # $50/day budget cap
+  budget_duration: 1d
+
+  # Caching (Redis-backed)
+  cache: true
+  cache_params:
+    type: redis
+    host: 10.10.0.1
+    port: 6379
+    password: fsc-mesh-2026
+    ttl: 3600
+
+  # Retry & fallback
+  num_retries: 2
+  request_timeout: 60
+  fallbacks:
+    - vllm/qwen-72b:
+      - sglang/qwen-72b
+      - ollama/qwen-7b
+      - doubao-seed
+    - sglang/qwen-72b:
+      - vllm/qwen-72b
+      - doubao-seed
+
+  # Logging
+  success_callback: ["redis"]
+  failure_callback: ["redis"]
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/LITELLM_DATABASE_URL  # optional: PostgreSQL for analytics

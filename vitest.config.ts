@@ -6,6 +6,6 @@ export default defineConfig({
     testTimeout: 30_000,
     hookTimeout: 30_000,
     fileParallelism: false,
-    include: ['governance/tests/**/*.test.ts'],
+    include: ['governance/tests/**/*.test.ts', 'packages/core/src/**/__tests__/**/*.test.ts'],
   },
 });

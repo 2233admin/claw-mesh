@@ -1,0 +1,64 @@
+# Prometheus scrape config for claw-mesh cluster
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+
+scrape_configs:
+  # ─── SUPER node (local) ───
+  - job_name: 'super-node'
+    static_configs:
+      - targets: ['localhost:9100']
+        labels:
+          node: super
+          role: gpu-inference
+
+  # ─── SUPER GPU metrics ───
+  - job_name: 'super-gpu'
+    static_configs:
+      - targets: ['localhost:9835']
+        labels:
+          node: super
+
+  # ─── vLLM metrics ───
+  - job_name: 'vllm'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['localhost:8000']
+        labels:
+          engine: vllm
+
+  # ─── SGLang metrics ───
+  - job_name: 'sglang'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['localhost:8001']
+        labels:
+          engine: sglang
+
+  # ─── LiteLLM gateway metrics ───
+  - job_name: 'litellm'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['localhost:4000']
+        labels:
+          engine: litellm
+
+  # ─── Remote mesh nodes (node-exporter) ───
+  - job_name: 'mesh-nodes'
+    static_configs:
+      - targets: ['10.10.0.1:9100']
+        labels:
+          node: central
+          role: coordinator
+      - targets: ['10.10.0.2:9100']
+        labels:
+          node: silicon-valley
+          role: cpu-inference
+      - targets: ['10.10.0.3:9100']
+        labels:
+          node: tokyo
+          role: cpu-inference
+      - targets: ['10.10.0.4:9100']
+        labels:
+          node: c-home
+          role: relay
