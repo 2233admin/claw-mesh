@@ -1,6 +1,3 @@
-// NOT IN PROD — TypeScript formal specification, not runtime code.
-// Canonical copy: spec/ts-governance/
-
 /**
  * FSC-Mesh Arbitration — 仲裁层（共识协议）
  *

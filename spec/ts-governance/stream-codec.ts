@@ -1,6 +1,3 @@
-// NOT IN PROD — TypeScript formal specification, not runtime code.
-// Canonical copy: spec/ts-governance/
-
 /**
  * FSC-Mesh Stream Codec — msgpack + JSON 双格式编解码
  *

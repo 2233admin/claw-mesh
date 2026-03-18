@@ -1,6 +1,3 @@
-// NOT IN PROD — TypeScript formal specification, not runtime code.
-// Canonical copy: spec/ts-governance/
-
 /**
  * FSC-Mesh Evolution — Agent 进化层（GEP 协议整合）
  *

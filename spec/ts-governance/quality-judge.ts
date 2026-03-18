@@ -1,6 +1,3 @@
-// NOT IN PROD — TypeScript formal specification, not runtime code.
-// Canonical copy: spec/ts-governance/
-
 /**
  * FSC-Mesh Quality Judge — 三重质量验证
  *

@@ -1,6 +1,3 @@
-// NOT IN PROD — TypeScript formal specification, not runtime code.
-// Canonical copy: spec/ts-governance/
-
 /**
  * FSC-Mesh Governance Control Plane — Type Definitions
  *
