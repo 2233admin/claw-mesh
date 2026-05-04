@@ -24,10 +24,12 @@
  */
 
 import { createClient } from 'redis';
+import Redis from 'ioredis';
 import { DockerInstance } from './packages/core/src/dockerInstance';
 import { encode as msgpackEncode } from '@msgpack/msgpack';
 import { FscCodec } from '../c/fsc-codec/ffi-bun';
 import { resolve } from 'path';
+import { startDeviceHeartbeat, stopDeviceHeartbeat } from './device-heartbeat';
 
 // C codec for zero-copy heartbeat encoding (fallback to msgpack if unavailable)
 let fscCodec: FscCodec | null = null;
@@ -310,7 +312,17 @@ async function mainLoop() {
   logger.info(`Self-healing: Enabled (60s interval)`);
   
   await redis.connect();
-  
+
+  // 启动 v2 设备心跳（ioredis 连接，跨平台指标 + mesh IP 检测）
+  const ioRedis = new Redis({
+    host: REDIS_HOST,
+    port: REDIS_PORT,
+    password: process.env.REDIS_PASSWORD || 'fsc-mesh-2026',
+    lazyConnect: false,
+  })
+  await startDeviceHeartbeat(ioRedis, AGENT_ID, () => MAX_CONCURRENT - semaphore.available())
+  logger.info('[Device Heartbeat] v2 heartbeat started (30s interval, mesh IP detection)')
+
   // 创建 consumer group（如果不存在）
   try {
     await redis.xGroupCreate(STREAM_KEY, CONSUMER_GROUP, '0', {
@@ -637,35 +649,9 @@ async function reportHeartbeat() {
       timestamp: Date.now()
     };
 
-    // 推送心跳到 Redis — C codec 零拷贝路径 (省 GC 压力)
-    const activeTasks = MAX_CONCURRENT - semaphore.available();
-    const [memUsed, memTotal] = memUsageStr.split('/').map(Number);
-
-    if (fscCodec) {
-      const hbEncoded = fscCodec.encodeHeartbeat({
-        agentId: AGENT_ID,
-        nodeId: REDIS_HOST,
-        cpuPercent: parseFloat(cpuUsageStr) || 0,
-        memUsedMb: memUsed || 0,
-        memTotalMb: memTotal || 0,
-        activeTasks,
-        timestamp: Date.now(),
-      });
-      const b64 = fscCodec.toBase64(Buffer.from(hbEncoded));
-      await redis.xAdd('fsc:heartbeats', '*', {
-        payload: b64,
-        encoding: 'msgpack',
-        type: 'heartbeat',
-      });
-    } else {
-      await redis.xAdd('fsc:heartbeats', '*', {
-        agent: AGENT_ID,
-        active_tasks: activeTasks.toString(),
-        metrics: JSON.stringify(metrics),
-      });
-    }
-
-    logger.debug(`[Self-Healing] Heartbeat sent: ${JSON.stringify(metrics)}`);
+    // 心跳推送已由 device-heartbeat.ts v2 接管（30s 间隔，跨平台指标 + mesh IP）
+    // 此处仅保留自愈引擎的资源监控日志
+    logger.debug(`[Self-Healing] Resource check: ${JSON.stringify(metrics)}`);
 
   } catch (error) {
     logger.error('[Self-Healing] Heartbeat report failed:', error);
@@ -698,9 +684,12 @@ async function shutdown(signal: string) {
   
   clearTimeout(timeout);
   
+  // 停止 v2 设备心跳
+  stopDeviceHeartbeat()
+
   // 触发最终 snapshot
   await triggerMemoVSnapshot('shutdown', 'worker_shutdown');
-  
+
   await redis.quit();
   logger.info('Shutdown complete');
   process.exit(0);

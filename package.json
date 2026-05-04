@@ -19,11 +19,14 @@
   "author": "AI-1 (陈昭芊)",
   "license": "MIT",
   "devDependencies": {
+    "@types/ioredis": "^5.0.0",
+    "bun-types": "^1.3.10",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
   },
   "dependencies": {
     "@msgpack/msgpack": "^3.1.3",
+    "ioredis": "^5.10.0",
     "redis": "^5.11.0"
   }
 }

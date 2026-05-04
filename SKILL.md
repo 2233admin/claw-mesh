@@ -1,6 +1,7 @@
 
 ---
 name: wireguard-mesh
+version: 1.0.0
 description: WireGuard 全网状 VPN + AI 集群调度器。用于多节点 WireGuard 组网、内网穿透、渲染农场式 DAG 任务调度。触发词：WireGuard、VPN 组网、全网状、mesh networking、节点互通、内网穿透、集群调度、异步推理、并行任务
 ---
 

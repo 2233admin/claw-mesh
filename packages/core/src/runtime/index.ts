@@ -1,4 +1,8 @@
+export { AgentRoom } from './agent-room'
+export type { RoomMessage, MessageType, AgentRoomOptions } from './agent-room'
 export { DockerRunner } from './docker-runner'
+export { RedisContextStore } from './context-store'
+export type { ContextEntry, Message, HandoffResult, ContextStoreOptions } from './context-store'
 export { NativeRunner } from './native-runner'
 export { WasmRunner } from './wasm-runner'
 export { GVisorRunner } from './gvisor-runner'
