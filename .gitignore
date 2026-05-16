@@ -21,3 +21,5 @@ experiments/iroh-mesh/target/
 
 .omx/
 PROJECT_INDEX.json
+
+.mcp.json
