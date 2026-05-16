@@ -23,3 +23,6 @@ experiments/iroh-mesh/target/
 PROJECT_INDEX.json
 
 .mcp.json
+
+bun.lock
+experiments/iroh-mesh/Cargo.lock
