@@ -18,3 +18,6 @@ AGENTS.md
 # Rust build
 rust/*/target/
 experiments/iroh-mesh/target/
+
+.omx/
+PROJECT_INDEX.json
